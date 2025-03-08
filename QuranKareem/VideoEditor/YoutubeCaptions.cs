@@ -153,7 +153,7 @@ namespace QuranKareem
 
                 if (word == 0)
                 {
-                    if (Equals(list[ayah + 1][0], line[2]))
+                    if (ayah <= list.Count - 2 && Equals(list[ayah + 1][0], line[2]))
                     {
                         ayah++;
                         word = 1;
