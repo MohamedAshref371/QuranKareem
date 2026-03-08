@@ -651,7 +651,7 @@
             this.saveRTF.Name = "saveRTF";
             this.saveRTF.Size = new System.Drawing.Size(126, 36);
             this.saveRTF.TabIndex = 24;
-            this.saveRTF.Text = "save .rtf";
+            this.saveRTF.Text = "قراءة سريعة";
             this.saveRTF.UseVisualStyleBackColor = true;
             this.saveRTF.Click += new System.EventHandler(this.SaveRTF_Click);
             // 
@@ -705,7 +705,7 @@
             this.quranPic.Size = new System.Drawing.Size(510, 900);
             this.quranPic.TabIndex = 2;
             this.quranPic.TabStop = false;
-            this.quranPic.Click += new System.EventHandler(this.QuranPic_Click);
+            this.quranPic.MouseClick += new System.Windows.Forms.MouseEventHandler(this.QuranPic_MouseClick);
             this.quranPic.MouseWheel += new System.Windows.Forms.MouseEventHandler(this.QuranPic_MouseWheel);
             // 
             // volume

@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Guna.UI2.WinForms;
 
@@ -656,13 +657,16 @@ namespace QuranKareem
             }
         }
 
-        private void QuranPic_Click(object sender, EventArgs e)
+        private void QuranPic_MouseClick(object sender, MouseEventArgs e)
         {
             if (allow
                 && quranPicture.SetXY(MousePosition.X - quranPic.Location.X - Location.X,
-                                    MousePosition.Y - quranPic.Location.Y - Location.Y,
-                                     quranPic.Width, quranPic.Height)
-                ) SetAyah();
+                                    MousePosition.Y - quranPic.Location.Y - Location.Y, quranPic.Width, quranPic.Height) )
+            {
+                SetAyah();
+                if (e.Button == MouseButtons.Right) // التفسير
+                    Task.Run(() => MessageBox.Show(quranTafseer.AyahTafseerText((int)Surah.Value, (int)Ayah.Value)));
+            }
         }
 
         // بديل عن المصحف المصور، ربما لن تراه في حياتك
@@ -713,10 +717,12 @@ namespace QuranKareem
         // إنشاء تنسيق نص منسق لتفسير الآية 
         private void SaveRTF_Click(object sender, EventArgs e)
         {
-            saveRichText.FileName = $"Tafseer Surah {Surah.Value} Ayah {Ayah.Value}";
+            //saveRichText.FileName = $"Tafseer Surah {Surah.Value} Ayah {Ayah.Value}";
             rtb.Text = quranTafseer.AyahTafseerText((int)Surah.Value, (int)Ayah.Value);
-            if (rtb.Text != "" && saveRichText.ShowDialog() == DialogResult.OK)
-                rtb.SaveFile(saveRichText.FileName);
+            //if (rtb.Text != "" && saveRichText.ShowDialog() == DialogResult.OK)
+            //    rtb.SaveFile(saveRichText.FileName);
+
+            MessageBox.Show(rtb.Text);
         }
 
         // البحث بالكلمات في القرآن
