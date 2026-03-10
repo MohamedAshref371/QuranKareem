@@ -50,6 +50,8 @@ namespace QuranKareem
         private float[] pagesSizeUnits;
 
         public bool UseColoringFont { get; set; } = false;
+        public float UnderlineY { get; set; } = 70f;
+        public float StrokeWidth { get; set; } = 4f;
 
         public static readonly TrueTypeFontQuran Instance = new TrueTypeFontQuran();
 
@@ -885,8 +887,8 @@ namespace QuranKareem
 
                 if (shouldUnderline)
                 {
-                    paint.StrokeWidth = 2f; 
-                    float underlineY = baseline + 70f; // يجب ان يكون رقم 70 متغير وليس ثابت
+                    paint.StrokeWidth = StrokeWidth;
+                    float underlineY = baseline + UnderlineY;
 
                     canvas.DrawLine(x, underlineY, x + w, underlineY, paint);
                 }

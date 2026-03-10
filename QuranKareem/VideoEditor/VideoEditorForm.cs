@@ -153,6 +153,18 @@ namespace QuranKareem
         private void TtfColrv1_CheckedChanged(object sender, EventArgs e)
         {
             TrueTypeFontQuran.Instance.UseColoringFont = ttfColrv1.Checked;
+            strokeLine.Enabled = ttfColrv1.Checked;
+            topLine.Enabled = ttfColrv1.Checked;
+        }
+
+        private void TopLine_ValueChanged(object sender, EventArgs e)
+        {
+            TrueTypeFontQuran.Instance.UnderlineY = (float)topLine.Value;
+        }
+
+        private void StrokeLine_ValueChanged(object sender, EventArgs e)
+        {
+            TrueTypeFontQuran.Instance.StrokeWidth = (float)strokeLine.Value;
         }
 
         private void VidiotLink_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)

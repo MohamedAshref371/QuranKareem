@@ -66,6 +66,10 @@
             this.oliveLink64 = new System.Windows.Forms.LinkLabel();
             this.oliveLink32 = new System.Windows.Forms.LinkLabel();
             this.ttfColrv1 = new System.Windows.Forms.CheckBox();
+            this.topLine = new System.Windows.Forms.NumericUpDown();
+            this.strokeLine = new System.Windows.Forms.NumericUpDown();
+            this.label1 = new System.Windows.Forms.Label();
+            this.label2 = new System.Windows.Forms.Label();
             ((System.ComponentModel.ISupportInitialize)(this.videoWidth)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.videoHeight)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.frameRate)).BeginInit();
@@ -74,6 +78,8 @@
             ((System.ComponentModel.ISupportInitialize)(this.locX)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.lineHeight)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.lineWidth)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.topLine)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.strokeLine)).BeginInit();
             this.SuspendLayout();
             // 
             // vidiotRadio
@@ -364,7 +370,7 @@
             // generate
             // 
             this.generate.Font = new System.Drawing.Font("Tahoma", 14F);
-            this.generate.Location = new System.Drawing.Point(292, 508);
+            this.generate.Location = new System.Drawing.Point(15, 508);
             this.generate.Name = "generate";
             this.generate.RightToLeft = System.Windows.Forms.RightToLeft.Yes;
             this.generate.Size = new System.Drawing.Size(203, 49);
@@ -611,7 +617,7 @@
             // 
             this.ttfColrv1.AutoSize = true;
             this.ttfColrv1.Font = new System.Drawing.Font("Tahoma", 12F);
-            this.ttfColrv1.Location = new System.Drawing.Point(670, 523);
+            this.ttfColrv1.Location = new System.Drawing.Point(670, 526);
             this.ttfColrv1.Name = "ttfColrv1";
             this.ttfColrv1.RightToLeft = System.Windows.Forms.RightToLeft.Yes;
             this.ttfColrv1.Size = new System.Drawing.Size(118, 23);
@@ -620,11 +626,86 @@
             this.ttfColrv1.UseVisualStyleBackColor = true;
             this.ttfColrv1.CheckedChanged += new System.EventHandler(this.TtfColrv1_CheckedChanged);
             // 
+            // topLine
+            // 
+            this.topLine.Enabled = false;
+            this.topLine.Font = new System.Drawing.Font("Tahoma", 14F);
+            this.topLine.Location = new System.Drawing.Point(445, 519);
+            this.topLine.Maximum = new decimal(new int[] {
+            200,
+            0,
+            0,
+            0});
+            this.topLine.Name = "topLine";
+            this.topLine.RightToLeft = System.Windows.Forms.RightToLeft.No;
+            this.topLine.Size = new System.Drawing.Size(87, 30);
+            this.topLine.TabIndex = 43;
+            this.topLine.Value = new decimal(new int[] {
+            70,
+            0,
+            0,
+            0});
+            this.topLine.ValueChanged += new System.EventHandler(this.TopLine_ValueChanged);
+            // 
+            // strokeLine
+            // 
+            this.strokeLine.Enabled = false;
+            this.strokeLine.Font = new System.Drawing.Font("Tahoma", 14F);
+            this.strokeLine.Location = new System.Drawing.Point(251, 519);
+            this.strokeLine.Maximum = new decimal(new int[] {
+            20,
+            0,
+            0,
+            0});
+            this.strokeLine.Minimum = new decimal(new int[] {
+            2,
+            0,
+            0,
+            0});
+            this.strokeLine.Name = "strokeLine";
+            this.strokeLine.RightToLeft = System.Windows.Forms.RightToLeft.No;
+            this.strokeLine.Size = new System.Drawing.Size(87, 30);
+            this.strokeLine.TabIndex = 44;
+            this.strokeLine.Value = new decimal(new int[] {
+            4,
+            0,
+            0,
+            0});
+            this.strokeLine.ValueChanged += new System.EventHandler(this.StrokeLine_ValueChanged);
+            // 
+            // label1
+            // 
+            this.label1.AutoSize = true;
+            this.label1.Font = new System.Drawing.Font("Tahoma", 12F);
+            this.label1.Location = new System.Drawing.Point(344, 526);
+            this.label1.Name = "label1";
+            this.label1.RightToLeft = System.Windows.Forms.RightToLeft.Yes;
+            this.label1.Size = new System.Drawing.Size(84, 19);
+            this.label1.TabIndex = 45;
+            this.label1.Text = "سمك الخط";
+            this.label1.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            // 
+            // label2
+            // 
+            this.label2.AutoSize = true;
+            this.label2.Font = new System.Drawing.Font("Tahoma", 12F);
+            this.label2.Location = new System.Drawing.Point(538, 526);
+            this.label2.Name = "label2";
+            this.label2.RightToLeft = System.Windows.Forms.RightToLeft.Yes;
+            this.label2.Size = new System.Drawing.Size(95, 19);
+            this.label2.TabIndex = 46;
+            this.label2.Text = "انخفاض الخط";
+            this.label2.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+            // 
             // VideoEditorForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(800, 569);
+            this.Controls.Add(this.label2);
+            this.Controls.Add(this.label1);
+            this.Controls.Add(this.strokeLine);
+            this.Controls.Add(this.topLine);
             this.Controls.Add(this.ttfColrv1);
             this.Controls.Add(this.oliveLink32);
             this.Controls.Add(this.oliveLink64);
@@ -674,6 +755,8 @@
             ((System.ComponentModel.ISupportInitialize)(this.locX)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.lineHeight)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.lineWidth)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.topLine)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.strokeLine)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
 
@@ -719,5 +802,9 @@
         private System.Windows.Forms.LinkLabel oliveLink64;
         private System.Windows.Forms.LinkLabel oliveLink32;
         private System.Windows.Forms.CheckBox ttfColrv1;
+        private System.Windows.Forms.NumericUpDown topLine;
+        private System.Windows.Forms.NumericUpDown strokeLine;
+        private System.Windows.Forms.Label label1;
+        private System.Windows.Forms.Label label2;
     }
 }
