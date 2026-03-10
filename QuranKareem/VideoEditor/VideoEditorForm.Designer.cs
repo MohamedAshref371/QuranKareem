@@ -65,6 +65,7 @@
             this.oliveRadio = new System.Windows.Forms.RadioButton();
             this.oliveLink64 = new System.Windows.Forms.LinkLabel();
             this.oliveLink32 = new System.Windows.Forms.LinkLabel();
+            this.ttfColrv1 = new System.Windows.Forms.CheckBox();
             ((System.ComponentModel.ISupportInitialize)(this.videoWidth)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.videoHeight)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.frameRate)).BeginInit();
@@ -606,11 +607,25 @@
             this.oliveLink32.Text = "x32";
             this.oliveLink32.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.OliveLink32_LinkClicked);
             // 
+            // ttfColrv1
+            // 
+            this.ttfColrv1.AutoSize = true;
+            this.ttfColrv1.Font = new System.Drawing.Font("Tahoma", 12F);
+            this.ttfColrv1.Location = new System.Drawing.Point(670, 523);
+            this.ttfColrv1.Name = "ttfColrv1";
+            this.ttfColrv1.RightToLeft = System.Windows.Forms.RightToLeft.Yes;
+            this.ttfColrv1.Size = new System.Drawing.Size(118, 23);
+            this.ttfColrv1.TabIndex = 42;
+            this.ttfColrv1.Text = "خط ttf colrv1";
+            this.ttfColrv1.UseVisualStyleBackColor = true;
+            this.ttfColrv1.CheckedChanged += new System.EventHandler(this.TtfColrv1_CheckedChanged);
+            // 
             // VideoEditorForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.ClientSize = new System.Drawing.Size(800, 569);
+            this.Controls.Add(this.ttfColrv1);
             this.Controls.Add(this.oliveLink32);
             this.Controls.Add(this.oliveLink64);
             this.Controls.Add(this.oliveLink);
@@ -703,5 +718,6 @@
         private System.Windows.Forms.RadioButton oliveRadio;
         private System.Windows.Forms.LinkLabel oliveLink64;
         private System.Windows.Forms.LinkLabel oliveLink32;
+        private System.Windows.Forms.CheckBox ttfColrv1;
     }
 }

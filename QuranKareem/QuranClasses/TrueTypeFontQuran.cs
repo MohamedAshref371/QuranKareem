@@ -1,4 +1,5 @@
-﻿using System;
+﻿using SkiaSharp;
+using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Drawing;
@@ -47,6 +48,8 @@ namespace QuranKareem
         private int prevAyah, prevWord;
 
         private float[] pagesSizeUnits;
+
+        public bool UseColoringFont { get; set; } = false;
 
         public static readonly TrueTypeFontQuran Instance = new TrueTypeFontQuran();
 
@@ -801,6 +804,106 @@ namespace QuranKareem
         }
 
         public Bitmap DrawText(string text, Font font, Color[] colors = null)
+        {
+            if (UseColoringFont && !string.IsNullOrEmpty(text))
+            {
+                Bitmap skiaResult = DrawTextWithSkiaSharp(text, font, colors);
+                if (skiaResult != null)
+                    return skiaResult;
+            }
+
+            // Fallback to GDI+ rendering
+            return DrawTextWithGDI(text, font, colors);
+        }
+
+        private Bitmap DrawTextWithSkiaSharp(string text, Font font, Color[] colors = null)
+        {
+            if (string.IsNullOrEmpty(text))
+                return new Bitmap(1, 1);
+
+            string fontPath = Path.Combine(path, $"{PageNumber.ToString().PadLeft(3, '0')}{Extension}");
+            if (!File.Exists(fontPath))
+            {
+                fontPath = Path.Combine(path, $"{PageNumber}{Extension}");
+            }
+            if (!File.Exists(fontPath))
+            {
+                return null; // Fallback to GDI+
+            }
+
+            SKTypeface typeface = SKTypeface.FromFile(fontPath);
+
+            SKPaint paint = new SKPaint
+            {
+                IsAntialias = true,
+                Typeface = typeface,
+                TextSize = font.Size,
+                SubpixelText = true,
+                LcdRenderText = true
+            };
+
+            float width = 0;
+            float height = paint.FontMetrics.Descent - paint.FontMetrics.Ascent;
+
+            float[] charWidths = new float[text.Length];
+
+            for (int i = 0; i < text.Length; i++)
+            {
+                charWidths[i] = paint.MeasureText(text[i].ToString());
+                width += charWidths[i];
+            }
+
+            int bmpWidth = (int)Math.Ceiling(width);
+            int bmpHeight = (int)Math.Ceiling(height);
+
+            SKImageInfo info = new SKImageInfo(bmpWidth, bmpHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
+
+            SKSurface surface = SKSurface.Create(info);
+            SKCanvas canvas = surface.Canvas;
+
+            canvas.Clear(SKColors.Transparent);
+
+            //bool hasColors = colors != null && colors.Length == text.Length;
+
+            float x = bmpWidth;
+            float baseline = -paint.FontMetrics.Ascent;
+
+            for (int i = 0; i < text.Length; i++)
+            {
+                float w = charWidths[i];
+                x -= w;
+
+                //Color c = hasColors ? colors[i] : (darkMode ? Color.White : Color.Black);
+                //paint.Color = new SKColor(c.R, c.G, c.B, c.A);
+
+                canvas.DrawText(text[i].ToString(), x, baseline, paint);
+            }
+
+            SKImage img = surface.Snapshot();
+            SKData data = img.Encode(SKEncodedImageFormat.Png, 100);
+
+            MemoryStream ms = new MemoryStream(data.ToArray());
+            Bitmap bmp = new Bitmap(ms);
+
+            if (darkMode)
+                for (int y = 0; y < bmp.Height; y++)
+                    for (int x0 = 0; x0 < bmp.Width; x0++)
+                    {
+                        Color c = bmp.GetPixel(x0, y);
+                        if (c.R < 40 && c.G < 40 && c.B < 40 && c.A > 0)
+                            bmp.SetPixel(x0, y, Color.FromArgb(c.A, 255 - c.R, 255 - c.G, 255 - c.B));
+                    }
+
+            data.Dispose();
+            img.Dispose();
+            surface.Dispose();
+            paint.Dispose();
+            typeface.Dispose();
+
+            return bmp;
+        }
+
+        private Bitmap DrawTextWithGDI(string text, Font font, Color[] colors = null)
         {
             if (string.IsNullOrEmpty(text))
                 return new Bitmap(1, 1);

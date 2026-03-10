@@ -150,6 +150,11 @@ namespace QuranKareem
             Process.Start("https://www.olivevideoeditor.org/dl/Olive-1e3cf53-Windows-x86_64.exe");
         }
 
+        private void TtfColrv1_CheckedChanged(object sender, EventArgs e)
+        {
+            TrueTypeFontQuran.Instance.UseColoringFont = ttfColrv1.Checked;
+        }
+
         private void VidiotLink_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
         {
             Process.Start("https://sourceforge.net/projects/vidiot");
