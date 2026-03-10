@@ -863,7 +863,7 @@ namespace QuranKareem
 
             canvas.Clear(SKColors.Transparent);
 
-            //bool hasColors = colors != null && colors.Length == text.Length;
+            bool hasColors = colors != null && colors.Length == text.Length;
 
             float x = bmpWidth;
             float baseline = -paint.FontMetrics.Ascent;
@@ -873,10 +873,23 @@ namespace QuranKareem
                 float w = charWidths[i];
                 x -= w;
 
-                //Color c = hasColors ? colors[i] : (darkMode ? Color.White : Color.Black);
-                //paint.Color = new SKColor(c.R, c.G, c.B, c.A);
+                Color c = hasColors ? colors[i] : (darkMode ? Color.White : Color.Black);
+
+                bool isWhite = c.R == 255 && c.G == 255 && c.B == 255;
+                bool isBlack = c.R == 0 && c.G == 0 && c.B == 0;
+                bool shouldUnderline = !isWhite && !isBlack;
+
+                paint.Color = new SKColor(c.R, c.G, c.B, c.A);
 
                 canvas.DrawText(text[i].ToString(), x, baseline, paint);
+
+                if (shouldUnderline)
+                {
+                    paint.StrokeWidth = 2f; 
+                    float underlineY = baseline + 70f; // يجب ان يكون رقم 70 متغير وليس ثابت
+
+                    canvas.DrawLine(x, underlineY, x + w, underlineY, paint);
+                }
             }
 
             SKImage img = surface.Snapshot();
