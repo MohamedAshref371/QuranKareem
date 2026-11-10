@@ -172,8 +172,15 @@
       <SubType>Component</SubType>
     </Compile>
     <Compile Include="DownloadFiles\Status.cs" />
+    <Compile Include="DownloadFiles\RecitationDownloader.cs" />
     <Compile Include="QuranClasses\AudioQuranCombiner.cs" />
+    <Compile Include="QuranClasses\AudioQuranSplitter.cs" />
+    <Compile Include="QuranClasses\LineFrameWriter.cs" />
+    <Compile Include="QuranClasses\FontLineRenderer.cs" />
     <Compile Include="QuranClasses\IVisualQuran.cs" />
+    <Compile Include="QuranClasses\QuranSearchService.cs" />
+    <Compile Include="QuranClasses\ReadingNavigator.cs" />
+    <Compile Include="QuranClasses\VisualQuranNavigation.cs" />
     <Compile Include="QuranClasses\TrueTypeFontQuran.cs" />
     <Compile Include="SharpPixelQK.cs" />
     <Compile Include="Form1.cs">

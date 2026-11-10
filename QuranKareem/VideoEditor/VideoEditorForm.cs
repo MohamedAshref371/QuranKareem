@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace QuranKareem
@@ -188,44 +189,75 @@ namespace QuranKareem
             autoCheck = lineHeightAuto.Checked;
         }
 
-        private void Generate_Click(object sender, EventArgs e)
+        private bool exporting;
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            string path = "videos\\" + DateTime.Now.Ticks.ToString();
-            if (quranClass == 2)
+            if (exporting) e.Cancel = true;
+            base.OnFormClosing(e);
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            bitmap?.Dispose();
+            bitmap = null;
+            base.OnFormClosed(e);
+        }
+
+        private async void Generate_Click(object sender, EventArgs e)
+        {
+            if (exporting) return;
+            exporting = true;
+            string caption = generate.Text;
+            generate.Text = "جاري إنشاء الصور…";
+            var inputs = new List<Control>();
+            foreach (Control control in Controls)
             {
-                TrueTypeFontQuran.Instance.GetAyatInLinesWithWordsMarks(
-                ayahword,
-                VideoXMLProperties.VideoWidth, VideoXMLProperties.VideoHeight,
-                (int)locX.Value, (int)locY.Value, (int)lineWidth.Value, (int)lineHeight.Value,
-                lineHeightAuto.Checked, yEditCheck.Checked,
-                path,
-                VideoXMLProperties.ImagesPaths,
-                surah, page
-                );
+                if (!control.Enabled) continue;
+                inputs.Add(control);
+                control.Enabled = false;
             }
-            else
+            UseWaitCursor = true;
+            try
             {
-                PictureQuran.Instance.GetAyatInLinesWithWordsMarks(
-                ayahword,
-                VideoXMLProperties.VideoWidth, VideoXMLProperties.VideoHeight,
-                (int)locX.Value, (int)locY.Value, (int)lineWidth.Value, (int)lineHeight.Value,
-                lineHeightAuto.Checked, yEditCheck.Checked,
-                path,
-                VideoXMLProperties.ImagesPaths,
-                bitmap, surah, page
-                );
-            }
-                
-            if (VideoXMLProperties.ImagesPaths.Count != 0)
-            {
+                string path = Path.Combine("videos", DateTime.Now.Ticks.ToString());
+                int frameWidth = VideoXMLProperties.VideoWidth, frameHeight = VideoXMLProperties.VideoHeight;
+                int x = (int)locX.Value, y = (int)locY.Value, lineW = (int)lineWidth.Value, lineH = (int)lineHeight.Value;
+                bool autoHeight = lineHeightAuto.Checked, centerVertically = yEditCheck.Checked;
+                Func<List<string>> render = quranClass == 2
+                    ? TrueTypeFontQuran.Instance.PrepareLineExport(ayahword, frameWidth, frameHeight, x, y, lineW, lineH,
+                        autoHeight, centerVertically, path, surah, page)
+                    : PictureQuran.Instance.PrepareLineExport(ayahword, frameWidth, frameHeight, x, y, lineW, lineH,
+                        autoHeight, centerVertically, path, bitmap, surah, page);
+
+                List<string> images = render == null ? null : await Task.Run(render);
+                VideoXMLProperties.ImagesPaths.Clear();
+                if (images == null || images.Count == 0)
+                {
+                    MessageBox.Show(this, "تعذّر إنشاء الصور. تأكّد إن المصحف يدعم تحديد الكلمات.");
+                    return;
+                }
+                if (images.Count != VideoXMLProperties.AudioTimestamps.Count)
+                    throw new InvalidOperationException("عدد الصور لا يطابق عدد التوقيتات.");
+
+                VideoXMLProperties.ImagesPaths.AddRange(images);
                 if (vidiotRadio.Checked)
-                    File.WriteAllText(path + $"\\QuranKareem.vid", VidiotXmlBuilder.Build());
+                    File.WriteAllText(Path.Combine(path, "QuranKareem.vid"), VidiotXmlBuilder.Build());
                 else if (oliveRadio.Checked)
-                    File.WriteAllText(path + $"\\QuranKareem.ove", OliveXmlBuilder.Build());
+                    File.WriteAllText(Path.Combine(path, "QuranKareem.ove"), OliveXmlBuilder.Build());
                 Process.Start(path);
             }
-            else
-                MessageBox.Show("هناك خطأ، يحتمل أن المصحف المصور لا يدعم تحديد الكلمات");
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "تعذّر إكمال تصدير المشروع.\n" + ex.Message, "تصدير الفيديو");
+            }
+            finally
+            {
+                foreach (Control control in inputs) control.Enabled = true;
+                generate.Text = caption;
+                UseWaitCursor = false;
+                exporting = false;
+            }
         }
 
         private void LocX_ValueChanged(object sender, EventArgs e)

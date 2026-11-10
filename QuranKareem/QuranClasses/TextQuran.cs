@@ -249,112 +249,20 @@ namespace QuranKareem
             return true;
         }
 
-        readonly StringBuilder sql = new StringBuilder();
         public bool Set(int surah = 0, int ayah = -2, bool next = false, int juz = 0, int hizb = 0, int quarter = 0, int page = 0)
         {
             if (!success) return false;
 
-            #region SQL Building
-            sql.Length = 0;
-            sql.Append("SELECT id,surah,quarter,page,ayah FROM ayat WHERE ");
-            #region Surah and Ayah
-            // Ayah
-            if ((surah <= 0 || surah == SurahNumber) && ayah >= -1)
-            {
-                if (ayah == AyatCount + 1)
-                {
-                    surah = SurahNumber != SurahsCount ? SurahNumber + 1 : 1;
-                    ayah = 0;
-                }
-                else if (ayah > AyatCount + 1)
-                {
-                    surah = SurahNumber;
-                    ayah = AyatCount;
-                }
-                else
-                    surah = SurahNumber;
+            VisualAyah? match = VisualQuranNavigation.Find(quran, this, SurahsCount, PagesCount, ayahId,
+                surah, ayah, next, juz, hizb, quarter, page);
+            if (!match.HasValue) return false;
 
-                if (ayah < 0) ayah = 0;
-                sql.Append($"surah >= {surah} AND ayah >= {ayah}");
-            }
-
-            // Surah and Ayah
-            else if (surah >= 1 && surah <= SurahsCount + 1)
-            {
-                if (surah == SurahsCount + 1) surah = 1;
-                if (ayah < 0) ayah = 0;
-                sql.Append($"surah >= {surah} AND ayah >= {ayah}");
-            }
-
-            // Ayah Plus
-            else if (next && SurahNumber >= 1)
-            {
-                if (SurahNumber == SurahsCount && AyahNumber == AyatCount)
-                    sql.Append("ayah >= 0");
-                else
-                    sql.Append($"id > {ayahId} AND ayah >= 0");
-            }
-            #endregion
-            #region Juz, Hizb, Quarter and Page
-            // Juz then Hizb and Quarter
-            else if (juz >= 1 && juz <= 31)
-            {
-                if (juz == 31) juz = 1;
-                if (quarter <= 0 || quarter > 8) quarter = 1;
-                if (hizb == 2 && quarter >= 1 && quarter <= 4) quarter += 4;
-
-                sql.Append($"quarter >= {juz * 8 - 8 + quarter} AND ayah >= 0");
-            }
-
-            // Hizb then Quarter
-            else if (hizb >= 1 && hizb <= 61)
-            {
-                if (hizb == 61) hizb = 1;
-                if (quarter <= 0 || quarter > 4) quarter = 1;
-
-                sql.Append($"quarter >= {hizb * 4 - 4 + quarter} AND ayah >= 0");
-            }
-
-            // Quarter only
-            else if (quarter >= 1 && quarter <= 241)
-            {
-                if (quarter == 241) quarter = 1;
-                sql.Append($"quarter >= {quarter} AND ayah >= 0");
-            }
-
-            // Page
-            else if (page >= 1 && page <= PagesCount + 1)
-            {
-                if (page == PagesCount + 1) page = 1;
-                sql.Append($"page >= {page} AND ayah >= 0");
-            }
-            #endregion
-            else
-            {
-                sql.Append($"surah >= {SurahNumber} AND ayah >= {AyahNumber}");
-            }
-            sql.Append(" LIMIT 1");
-            #endregion
-
-            #region SQL Execution
-            quran.Open();
-            command.CommandText = sql.ToString();
-            reader = command.ExecuteReader();
-            if (!reader.Read())
-            {
-                reader.Close(); quran.Close();
-                return false;
-            }
-            ayahId = reader.GetInt32(0);
-            surah = reader.GetInt32(1);
-            QuarterNumber = reader.GetInt32(2);
-            page = reader.GetInt32(3);
-            AyahNumber = reader.GetInt32(4);
-            reader.Close(); quran.Close();
-            #endregion
-
-            if (surah != SurahNumber) SurahData(surah);
-            if (page != PageNumber) PageTextAt(page);
+            VisualAyah verse = match.Value;
+            ayahId = verse.Id;
+            QuarterNumber = verse.Quarter;
+            AyahNumber = verse.Ayah;
+            if (verse.Surah != SurahNumber) SurahData(verse.Surah);
+            if (verse.Page != PageNumber) PageTextAt(verse.Page);
             AyahData();
 
             return true;
@@ -497,13 +405,25 @@ namespace QuranKareem
         {
             try
             {
-                if (textType == TextType.rich && word > 0 && GetColor(2, darkMode).A != 0 && ayahId - pageStartId < wordsPosition.Count && wordsPosition[ayahId - pageStartId] != null)
+                int verse = ayahId - pageStartId;
+                if (textType == TextType.rich && verse >= 0 && verse < wordsPosition.Count && wordsPosition[verse] != null)
                 {
-                    pageRichText.Select(wordsPosition[ayahId - pageStartId][word - 1], wordsPosition[ayahId - pageStartId][word] - wordsPosition[ayahId - pageStartId][word - 1]);
-                    pageRichText.SelectionColor = GetColor(2, darkMode);
+                    List<int> offsets = wordsPosition[verse];
+                    if (CurrentWord > 0 && CurrentWord < offsets.Count)
+                    {
+                        pageRichText.Select(offsets[CurrentWord - 1], offsets[CurrentWord] - offsets[CurrentWord - 1]);
+                        Color ayahColor = GetColor(1, darkMode);
+                        pageRichText.SelectionColor = ayahColor.A == 0 ? pageRichText.ForeColor : ayahColor;
+                    }
+                    CurrentWord = -1;
+                    if (WordMode && word > 0 && word < offsets.Count && GetColor(2, darkMode).A != 0)
+                    {
+                        pageRichText.Select(offsets[word - 1], offsets[word] - offsets[word - 1]);
+                        pageRichText.SelectionColor = GetColor(2, darkMode);
+                        CurrentWord = word;
+                    }
                     pageRichText.DeselectAll();
-                    CurrentWord = word;
-                    return true;
+                    return CurrentWord > 0;
                 }
             }
             catch { }
@@ -586,62 +506,24 @@ namespace QuranKareem
             return lst.ToArray();
         }
 
-        private readonly List<int> SearchIDs = new List<int>();
         readonly List<string> lst = new List<string>();
-        public string[] Search(string words, bool spellingErrors = false)
-        {
-            SearchIDs.Clear();
-            if (!success || words == null || words.Trim() == "") return new string[] { };
-            if (spellingErrors) words = SpellingErrors(words);
-            lst.Clear();
-            quran.Open();
-            command.CommandText = "SELECT id,surah,ayah,abstract_text FROM ayat";
-            reader = command.ExecuteReader();
-            string s;
-            while (reader.Read())
-            {
-                s = reader.GetString(3);
-                if (spellingErrors) s = SpellingErrors(s);
-                if (s.Contains(words))
-                {
-                    s = reader.GetString(3);
-                    lst.Add($"{(s.Length > 60 ? s.Substring(0, 60) + "..." : s)}");
-                    SearchIDs.Add(reader.GetInt32(0));
-                }
-            }
-            reader.Close(); quran.Close();
-            return lst.ToArray();
-        }
-
         public string SpellingErrors(string s, bool taaMarbota = true)
-        {
-            s = s.Replace(" ", "")
-                    .Replace("ى", "ا").Replace("أ", "ا").Replace("إ", "ا").Replace("آ", "ا").Replace("ئ", "ا").Replace("ء", "ا").Replace("ؤ", "ا")
-                    .Replace("ذ", "ز").Replace("ظ", "ز");
-            if (taaMarbota)
-                s = s.Replace("ة", "ت");
-            else
-                s = s.Replace("ة", "").Replace("ه", "");
-            s = s.Replace("ط", "ت")
-                .Replace("ث", "س").Replace("ص", "س")
-                .Replace("ض", "د")
-                .Replace("ق", "ك")
-                ;
-            return s;
-        }
+            => QuranSearchService.Normalize(s, taaMarbota);
 
-        public int[] SelectedSearchIndex(int i)
+        internal int[] GetStartAndEndOfPage()
         {
-            if (!success || SearchIDs.Count == 0 || i < 0 || i >= SearchIDs.Count) return null;
-            int[] sura_aya = new int[2];
-            quran.Open();
-            command.CommandText = $"SELECT surah,ayah FROM ayat WHERE id={SearchIDs[i]}";
-            reader = command.ExecuteReader();
-            reader.Read();
-            sura_aya[0] = reader.GetInt32(0);
-            sura_aya[1] = reader.GetInt32(1);
-            reader.Close(); quran.Close();
-            return sura_aya;
+            using (var query = new SQLiteCommand("SELECT MIN(ayah),MAX(ayah) FROM ayat WHERE surah=@surah AND page=@page AND ayah>=1", quran))
+            {
+                query.Parameters.AddWithValue("@surah", SurahNumber);
+                query.Parameters.AddWithValue("@page", PageNumber);
+                quran.Open();
+                try
+                {
+                    using (var rows = query.ExecuteReader())
+                        return rows.Read() && !rows.IsDBNull(0) ? new[] { rows.GetInt32(0), rows.GetInt32(1) } : null;
+                }
+                finally { quran.Close(); }
+            }
         }
 
         public List<string[]> SelectAbstractWords(int surah, int ayahStart = 0, int ayahEnd = 287)

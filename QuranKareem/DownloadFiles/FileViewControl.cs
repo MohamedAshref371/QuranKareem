@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Drawing;
+using System.IO;
 using System.Windows.Forms;
 
 namespace QuranKareem
@@ -58,7 +59,8 @@ namespace QuranKareem
 
         public event EventHandler DownloadButtonClick;
 
-        public readonly string FileLink, FilePath;
+        public readonly Uri FileLink;
+        public readonly string FilePath;
         public readonly string FileName, FolderName;
 
         public bool Checked
@@ -84,16 +86,7 @@ namespace QuranKareem
             downloadBtn.Tag = this;
         }
 
-        public Status Status
-        {
-            set
-            {
-                if (status.InvokeRequired)
-                    status.Invoke(new Action(() => UpdateUI(value)));
-                else
-                    UpdateUI(value);
-            }
-        }
+        public Status Status { set => UpdateUI(value); }
 
         private void UpdateUI(Status _status)
         {
@@ -134,10 +127,10 @@ namespace QuranKareem
                     downloadBtn.Enabled = true;
                     break;
                 case Status.Error:
-                    status.Text = "خطأ";
-                    status.ForeColor = Color.FromArgb(255, 0, 0);
-                    //checkBox.Enabled = !IsForce;
-                    checkBox.Enabled = true;
+                case Status.Canceled:
+                    status.Text = _status == Status.Error ? "فشل التحميل" : "أُلغي التحميل";
+                    status.ForeColor = _status == Status.Error ? Color.Firebrick : SystemColors.ControlText;
+                    checkBox.Enabled = !File.Exists(FilePath);
                     downloadBtn.Enabled = true;
                     break;
             }
@@ -154,7 +147,7 @@ namespace QuranKareem
             Initialize();
         }
 
-        public FileViewControl(string link, string filePath, string _fileName, string _folderName, bool isExist)
+        public FileViewControl(Uri link, string filePath, string _fileName, string _folderName, bool isExist)
         {
             FileLink = link; FilePath = filePath;
             FileName = _fileName; FolderName = _folderName;
@@ -168,8 +161,10 @@ namespace QuranKareem
 
         public void Clicked(object sender, EventArgs e)
         {
-            if (checkBox.Enabled || (IsForce = AreYouSure()))
-                DownloadButtonClick?.Invoke(downloadBtn, e);
+            if (!downloadBtn.Enabled) return;
+            IsForce = File.Exists(FilePath);
+            if (IsForce && !AreYouSure()) return;
+            DownloadButtonClick?.Invoke(downloadBtn, e);
         }
 
         private static bool AreYouSure() => MessageBox.Show("الملف موجود بالفعل، هل تريد إعادة تحميله؟", "؟!?", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;

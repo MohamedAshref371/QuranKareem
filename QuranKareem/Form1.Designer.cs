@@ -66,8 +66,6 @@
             this.tafasir = new System.Windows.Forms.ComboBox();
             this.tafseerCopy = new System.Windows.Forms.Button();
             this.saveRTF = new System.Windows.Forms.Button();
-            this.saveRichText = new System.Windows.Forms.SaveFileDialog();
-            this.rtb = new System.Windows.Forms.RichTextBox();
             this.latest = new Guna.UI2.WinForms.Guna2Button();
             this.stop = new System.Windows.Forms.Button();
             this.quranPic = new System.Windows.Forms.PictureBox();
@@ -605,9 +603,11 @@
             this.searchText.Font = new System.Drawing.Font("Tahoma", 12F);
             this.searchText.Location = new System.Drawing.Point(12, 503);
             this.searchText.Name = "searchText";
+            this.searchText.RightToLeft = System.Windows.Forms.RightToLeft.Yes;
             this.searchText.Size = new System.Drawing.Size(262, 27);
             this.searchText.TabIndex = 20;
             this.searchText.TextAlign = System.Windows.Forms.HorizontalAlignment.Center;
+            this.searchText.KeyDown += new System.Windows.Forms.KeyEventHandler(this.SearchText_KeyDown);
             // 
             // searchClose
             // 
@@ -616,7 +616,7 @@
             this.searchClose.Name = "searchClose";
             this.searchClose.Size = new System.Drawing.Size(90, 32);
             this.searchClose.TabIndex = 19;
-            this.searchClose.Text = "الغاء";
+            this.searchClose.Text = "إغلاق";
             this.searchClose.UseVisualStyleBackColor = true;
             this.searchClose.Visible = false;
             this.searchClose.Click += new System.EventHandler(this.SearchClose_Click);
@@ -654,22 +654,6 @@
             this.saveRTF.Text = "قراءة سريعة";
             this.saveRTF.UseVisualStyleBackColor = true;
             this.saveRTF.Click += new System.EventHandler(this.SaveRTF_Click);
-            // 
-            // saveRichText
-            // 
-            this.saveRichText.FileName = "tafseer";
-            this.saveRichText.Filter = "Rich Text File|*.rtf";
-            // 
-            // rtb
-            // 
-            this.rtb.Font = new System.Drawing.Font("Times New Roman", 15F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
-            this.rtb.Location = new System.Drawing.Point(-39, 706);
-            this.rtb.Name = "rtb";
-            this.rtb.RightToLeft = System.Windows.Forms.RightToLeft.Yes;
-            this.rtb.Size = new System.Drawing.Size(50, 51);
-            this.rtb.TabIndex = 57;
-            this.rtb.Text = "Tafseer";
-            this.rtb.Visible = false;
             // 
             // latest
             // 
@@ -819,7 +803,7 @@
             this.descSave.Name = "descSave";
             this.descSave.Size = new System.Drawing.Size(155, 35);
             this.descSave.TabIndex = 27;
-            this.descSave.Text = "حفظ و تنظيف";
+            this.descSave.Text = "حفظ الوصف";
             this.descSave.UseVisualStyleBackColor = true;
             this.descSave.Visible = false;
             this.descSave.Click += new System.EventHandler(this.DescSave_Click);
@@ -1118,7 +1102,6 @@
             this.Controls.Add(this.label11);
             this.Controls.Add(this.volume);
             this.Controls.Add(this.latest);
-            this.Controls.Add(this.rtb);
             this.Controls.Add(this.saveRTF);
             this.Controls.Add(this.tafseerCopy);
             this.Controls.Add(this.tafasir);
@@ -1161,7 +1144,6 @@
             this.Name = "Form1";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
             this.Text = "Quran Kareem";
-            this.WindowState = System.Windows.Forms.FormWindowState.Maximized;
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.Form1_FormClosing);
             this.Load += new System.EventHandler(this.Form1_Load);
             ((System.ComponentModel.ISupportInitialize)(this.Surah)).EndInit();
@@ -1218,8 +1200,6 @@
         private System.Windows.Forms.Button tafseerCopy;
         private System.Windows.Forms.ComboBox tafasir;
         private System.Windows.Forms.Button saveRTF;
-        private System.Windows.Forms.SaveFileDialog saveRichText;
-        private System.Windows.Forms.RichTextBox rtb;
         private Guna.UI2.WinForms.Guna2Button latest;
         private System.Windows.Forms.Label label11;
         private Guna.UI2.WinForms.Guna2TrackBar volume;

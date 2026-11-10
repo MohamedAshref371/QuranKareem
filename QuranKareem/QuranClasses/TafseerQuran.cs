@@ -1,100 +1,142 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
+using System.Globalization;
+using System.IO;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace QuranKareem
 {
-    internal class TafseerQuran
+    // An immutable source. Each read owns its connection, including concurrent preview and export.
+    internal sealed class TafseerQuran
     {
-        #region Create The Class
-        private bool success = false;
+        private readonly string connectionString;
+        public string Name { get; }
+        public string Key { get; }
 
-        private readonly SQLiteConnection quran;
-        private readonly SQLiteCommand command;
-        private SQLiteDataReader reader;
-
-        public static readonly TafseerQuran Instance = new TafseerQuran();
-
-        private TafseerQuran()
+        public TafseerQuran(string file, string key)
         {
-            quran = new SQLiteConnection();
-            command = new SQLiteCommand(quran);
+            Name = Path.GetFileNameWithoutExtension(file);
+            Key = key;
+            connectionString = new SQLiteConnectionStringBuilder
+            {
+                DataSource = Path.GetFullPath(file), ReadOnly = true, FailIfMissing = true, Version = 3
+            }.ConnectionString;
         }
-        #endregion
 
-        private int version;
+        public override string ToString() => Name;
 
-        public int Narration { get; private set; }
-        public string Comment { get; private set; }
-
-        public void Start(string file, int sura = 1, int aya = 0)
+        private SQLiteConnection Open(CancellationToken cancellation)
         {
-            success = false;
-            if (file == null || file.Trim().Length == 0) return;
+            cancellation.ThrowIfCancellationRequested();
+            var connection = new SQLiteConnection(connectionString);
             try
             {
-                quran.ConnectionString = $"Data Source={file}; Version=3;";
-                quran.Open();
-                command.CommandText = $"SELECT * FROM description";
-
-                reader = command.ExecuteReader();
-                if (!reader.HasRows) return;
-                reader.Read();
-
-                if (reader.GetInt32(0) != 4 || reader.GetInt32(1) /*version*/ != 1) return;
-                Comment = reader.GetString(6);
-
-                success = true;
+                connection.Open();
+                using (var validation = new SQLiteCommand("SELECT type,version FROM description LIMIT 1", connection))
+                using (var row = validation.ExecuteReader())
+                    if (!row.Read() || row.GetInt32(0) != 4 || row.GetInt32(1) != 1)
+                        throw new InvalidDataException("ملف التفسير أو الترجمة غير مدعوم.");
+                cancellation.ThrowIfCancellationRequested();
+                return connection;
             }
-            catch { }
+            catch { connection.Dispose(); throw; }
+        }
+
+        public Task<string> AyahTextAsync(int surah, int ayah, CancellationToken cancellation)
+        {
+            return Task.Run(() =>
+            {
+                using (var connection = Open(cancellation))
+                using (var query = new SQLiteCommand("SELECT text FROM ayat WHERE surah=@surah AND ayah=@ayah ORDER BY id LIMIT 1", connection))
+                {
+                    query.Parameters.AddWithValue("@surah", surah);
+                    query.Parameters.AddWithValue("@ayah", ayah);
+                    string text = query.ExecuteScalar() as string ?? "";
+                    cancellation.ThrowIfCancellationRequested();
+                    return text;
+                }
+            }, cancellation);
+        }
+
+        public Task<string> SubRipTextAsync(int surah, IReadOnlyList<(int Ayah, int From, int To)> timings, bool relativeToFirstAyah)
+            => Task.Run(() => SubRipText(surah, timings, relativeToFirstAyah));
+
+        private string SubRipText(int surah, IReadOnlyList<(int Ayah, int From, int To)> timings, bool relativeToFirstAyah)
+        {
+            if (timings == null || timings.Count == 0) return "";
+            var verses = new Dictionary<int, string>();
+            using (var connection = Open(CancellationToken.None))
+            using (var query = new SQLiteCommand("SELECT ayah,text FROM ayat WHERE surah=@surah AND ayah BETWEEN @first AND @last ORDER BY ayah,id", connection))
+            {
+                query.Parameters.AddWithValue("@surah", surah);
+                query.Parameters.AddWithValue("@first", timings[0].Ayah);
+                query.Parameters.AddWithValue("@last", timings[timings.Count - 1].Ayah);
+                using (var rows = query.ExecuteReader())
+                    while (rows.Read())
+                    {
+                        int ayah = rows.GetInt32(0);
+                        if (!rows.IsDBNull(1) && !verses.ContainsKey(ayah)) verses.Add(ayah, rows.GetString(1));
+                    }
+            }
+
+            var srt = new StringBuilder();
+            int index = 0, offset = relativeToFirstAyah ? timings[0].From : 0;
+            foreach (var timing in timings)
+            {
+                if (timing.From < offset || timing.To <= timing.From ||
+                    !verses.TryGetValue(timing.Ayah, out string verse) || string.IsNullOrWhiteSpace(verse)) continue;
+                srt.AppendLine((++index).ToString(CultureInfo.InvariantCulture));
+                srt.Append(Timecode(timing.From - offset)).Append(" --> ").AppendLine(Timecode(timing.To - offset));
+                // Blank lines delimit cues in SRT, so keep paragraph breaks out of a cue.
+                foreach (string line in verse.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries))
+                    if (!string.IsNullOrWhiteSpace(line)) srt.AppendLine(line.Trim());
+                srt.AppendLine();
+            }
+            return srt.ToString();
+        }
+
+        private static string Timecode(int milliseconds)
+        {
+            TimeSpan time = TimeSpan.FromMilliseconds(milliseconds);
+            return ((int)time.TotalHours).ToString("D2", CultureInfo.InvariantCulture) +
+                time.ToString(@"\:mm\:ss\,fff", CultureInfo.InvariantCulture);
+        }
+    }
+
+    // Used on the UI thread. Even a read that finishes after cancellation cannot publish.
+    internal sealed class LatestTafseerRequest
+    {
+        private CancellationTokenSource active;
+
+        public async Task RunAsync(Func<CancellationToken, Task<string>> read, Action<string> publish, Action<Exception> report)
+        {
+            Cancel();
+            var request = new CancellationTokenSource();
+            active = request;
+            try
+            {
+                string text = await read(request.Token);
+                if (active == request) publish(text);
+            }
+            catch (Exception error)
+            {
+                if (active == request) report(error);
+            }
             finally
             {
-                reader?.Close();
-                quran.Close();
+                if (active == request) active = null;
+                request.Dispose();
             }
         }
 
-        private string tempString;
-        public string AyahTafseerText(int sura, int aya)
+        public void Cancel()
         {
-            if (!success) return "";
-            quran.Open();
-            command.CommandText = $"SELECT text FROM ayat WHERE surah={sura} AND ayah={aya}";
-            reader = command.ExecuteReader();
-            tempString = reader.Read() && !reader.IsDBNull(0) ? reader.GetString(0) : "";
-            reader.Close();
-            quran.Close();
-            return tempString;
-        }
-
-        string[] SurahTafseerText(int sura, int ayahStart = -1, int ayahEnd = 287)
-        {
-            if (!success) return null;
-            quran.Open();
-            command.CommandText = $"SELECT text FROM ayat WHERE surah={sura} AND ayah>={ayahStart} AND ayah<={ayahEnd}";
-            reader = command.ExecuteReader();
-            List<string> list = new List<string>();
-            while (reader.Read())
-            {
-                list.Add(!reader.IsDBNull(0) ? reader.GetString(0) : "");
-            }
-            reader.Close();
-            quran.Close();
-            return list.ToArray();
-        }
-
-        readonly string n = Environment.NewLine;
-        public string SubRipText(string[] timestamps, int surah, int ayahStart = -1, int ayahEnd = 287)
-        {
-            if (!success) return "";
-            string[] tafseer = SurahTafseerText(surah, ayahStart, ayahEnd);
-            if (timestamps == null || tafseer.Length != timestamps.Length) return "";
-
-            string s = $"0{n}00:00:00.000 --> {timestamps[0]}{n}{tafseer[0]}{n}{n}";
-            for (int i = 0; i < timestamps.Length - 1; i++)
-                s += $"{i + 1}{n}{timestamps[i]} --> {timestamps[i + 1]}{n}{tafseer[i + 1]}{n}{n}";
-
-            return s;
+            var previous = active;
+            active = null;
+            previous?.Cancel();
         }
     }
 }

@@ -1,9 +1,7 @@
-﻿using SkiaSharp;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.IO;
 using System.Text;
@@ -226,113 +224,21 @@ namespace QuranKareem
             return true;
         }
 
-        readonly StringBuilder str = new StringBuilder();
         public bool Set(int surah = 0, int ayah = -2, bool next = false, int juz = 0, int hizb = 0, int quarter = 0, int page = 0)
         {
             if (!success) return false;
 
-            #region SQL Building
-            str.Length = 0;
-            str.Append("SELECT id,surah,quarter,page,ayah,words_count FROM ayat WHERE ");
-            #region Surah and Ayah
-            // Ayah
-            if ((surah <= 0 || surah == SurahNumber) && ayah >= -1)
-            {
-                if (ayah == AyatCount + 1)
-                {
-                    surah = SurahNumber != SurahsCount ? SurahNumber + 1 : 1;
-                    ayah = 0;
-                }
-                else if (ayah > AyatCount + 1)
-                {
-                    surah = SurahNumber;
-                    ayah = AyatCount;
-                }
-                else
-                    surah = SurahNumber;
+            VisualAyah? match = VisualQuranNavigation.Find(quran, this, SurahsCount, PagesCount, ayahId,
+                surah, ayah, next, juz, hizb, quarter, page, includeWordCount: true);
+            if (!match.HasValue) return false;
 
-                if (ayah < 0) ayah = 0;
-                str.Append($"surah >= {surah} AND ayah >= {ayah}");
-            }
-
-            // Surah and Ayah
-            else if (surah >= 1 && surah <= SurahsCount + 1)
-            {
-                if (surah == SurahsCount + 1) surah = 1;
-                if (ayah < 0) ayah = 0;
-                str.Append($"surah >= {surah} AND ayah >= {ayah}");
-            }
-
-            // Ayah Plus
-            else if (next && SurahNumber >= 1)
-            {
-                if (SurahNumber == SurahsCount && AyahNumber == AyatCount)
-                    str.Append("ayah >= 0");
-                else
-                    str.Append($"id > {ayahId} AND ayah >= 0");
-            }
-            #endregion
-            #region Juz, Hizb, Quarter and Page
-            // Juz then Hizb and Quarter
-            else if (juz >= 1 && juz <= 31)
-            {
-                if (juz == 31) juz = 1;
-                if (quarter <= 0 || quarter > 8) quarter = 1;
-                if (hizb == 2 && quarter >= 1 && quarter <= 4) quarter += 4;
-
-                str.Append($"quarter >= {juz * 8 - 8 + quarter} AND ayah >= 0");
-            }
-
-            // Hizb then Quarter
-            else if (hizb >= 1 && hizb <= 61)
-            {
-                if (hizb == 61) hizb = 1;
-                if (quarter <= 0 || quarter > 4) quarter = 1;
-
-                str.Append($"quarter >= {hizb * 4 - 4 + quarter} AND ayah >= 0");
-            }
-
-            // Quarter only
-            else if (quarter >= 1 && quarter <= 241)
-            {
-                if (quarter == 241) quarter = 1;
-                str.Append($"quarter >= {quarter} AND ayah >= 0");
-            }
-
-            // Page
-            else if (page >= 1 && page <= PagesCount + 1)
-            {
-                if (page == PagesCount + 1) page = 1;
-                str.Append($"page >= {page} AND ayah >= 0");
-            }
-            #endregion
-            else
-            {
-                str.Append($"surah >= {SurahNumber} AND ayah >= {AyahNumber}");
-            }
-            str.Append(" LIMIT 1");
-            #endregion
-
-            #region SQL Execution
-            quran.Open();
-            command.CommandText = str.ToString();
-            reader = command.ExecuteReader();
-            if (!reader.Read())
-            {
-                reader.Close(); quran.Close();
-                return false;
-            }
-            ayahId = reader.GetInt32(0);
-            surah = reader.GetInt32(1);
-            QuarterNumber = reader.GetInt32(2);
-            page = reader.GetInt32(3);
-            AyahNumber = reader.GetInt32(4);
-            wordsCount = reader.GetInt32(5);
-            reader.Close(); quran.Close();
-            #endregion
-
-            if (surah != SurahNumber) SurahData(surah);
-            if (page != PageNumber) PageData(page);
+            VisualAyah verse = match.Value;
+            ayahId = verse.Id;
+            QuarterNumber = verse.Quarter;
+            AyahNumber = verse.Ayah;
+            wordsCount = verse.WordCount;
+            if (verse.Surah != SurahNumber) SurahData(verse.Surah);
+            if (verse.Page != PageNumber) PageData(verse.Page);
             AyahData();
 
             return true;
@@ -413,39 +319,27 @@ namespace QuranKareem
 
         private bool CatchFontFile(int page, ref PrivateFontCollection coll)
         {
-            string s = page.ToString().PadLeft(3, '0');
-
             coll?.Dispose();
             coll = new PrivateFontCollection();
-
-            string filePath = $"{path}{s}{Extension}";
-
-            if (File.Exists(filePath))
-                coll.AddFontFile(filePath);
-            else
-            {
-                filePath = $"{path}{page}{Extension}";
-
-                if (File.Exists(filePath))
-                    coll.AddFontFile(filePath);
-                else
-                {
-                    string[] filesName = Directory.GetFiles(path, $"*{Extension}");
-
-                    foreach (string file in filesName)
-                    {
-                        string name = Path.GetFileName(file);
-
-                        if (name.Contains(s) || page == 0 && name.IndexOf("bsml", StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                            coll.AddFontFile(file);
-                            break;
-                        }
-                    }
-                }
-            }
-
+            string filePath = FindFontFile(page);
+            if (filePath != null) coll.AddFontFile(filePath);
             return coll.Families.Length != 0;
+        }
+
+        private string FindFontFile(int page)
+        {
+            string s = page.ToString().PadLeft(3, '0');
+            string filePath = $"{path}{s}{Extension}";
+            if (File.Exists(filePath)) return filePath;
+            filePath = $"{path}{page}{Extension}";
+            if (File.Exists(filePath)) return filePath;
+            foreach (string file in Directory.EnumerateFiles(path, $"*{Extension}"))
+            {
+                string name = Path.GetFileName(file);
+                if (name.Contains(s) || page == 0 && name.IndexOf("bsml", StringComparison.OrdinalIgnoreCase) >= 0)
+                    return file;
+            }
+            return null;
         }
 
         private int ayahIdIndex, wordIndex = 0;
@@ -622,7 +516,7 @@ namespace QuranKareem
             int[] ints = new int[2];
             quran.Open();
             reader = command.ExecuteReader();
-            if (reader.Read())
+            if (reader.Read() && !reader.IsDBNull(0))
             {
                 ints[0] = reader.GetInt32(0);
                 ints[1] = reader.GetInt32(1);
@@ -632,361 +526,131 @@ namespace QuranKareem
             return ints;
         }
 
-#warning very slow
+        private sealed class ExportFontLine
+        {
+            public readonly StringBuilder Text = new StringBuilder();
+            public readonly List<Color> PageColors = new List<Color>();
+            public readonly List<Color> WordColors = new List<Color>();
+            public readonly Dictionary<(int Ayah, int Word), List<int>> GlyphIndices = new Dictionary<(int, int), List<int>>();
+            public FontLineRenderer.Layout Layout;
+            public Color[] Colors;
+        }
+
         public void GetAyatInLinesWithWordsMarks(List<int> ayahword, int width, int height, int locx, int locy, int linWdth, int linHght, bool autoHeight, bool yEdit, string path, List<string> paths, int surah, int page)
         {
+            if (paths == null) throw new ArgumentNullException(nameof(paths));
             paths.Clear();
-            if (!success || ayahword == null || paths == null || ayahword.Count == 0) return;
-
-            try
-            {
-                Directory.CreateDirectory($"{path}\\img\\");
-
-                List<List<int>> lines = new List<List<int>>();
-                List<List<char>> texts = new List<List<char>>();
-                List<List<Color>> pColors = new List<List<Color>>();
-                List<List<Color>> wColors = new List<List<Color>>();
-
-                GetLinesData(lines, texts, pColors, wColors, surah, page);
-
-                if (lines.Count == 0) return;
-
-                PrivateFontCollection fontPage = null;
-                CatchFontFile(page, ref fontPage);
-
-                if (fontPage?.Families.Length == 0) return;
-
-                Font f = new Font(fontPage.Families[0], linWdth / pagesSizeUnits[page - 1], GraphicsUnit.Pixel);
-
-                int lineIdx = 0;
-
-                for (int i = 0; i < ayahword.Count / 2; i++)
-                {
-                    if (ayahword[i * 2 + 1] >= 0)
-                        lineIdx = GetIndexLineAtAyahWord(lines, ayahword[i * 2], ayahword[i * 2 + 1]);
-
-                    if (lineIdx < 0 || lineIdx >= lines.Count) continue;
-
-                    Color[] lineColors = GetLineColorsAtAyahWord(lines[lineIdx], pColors[lineIdx], wColors[lineIdx], ayahword[i * 2], ayahword[i * 2 + 1]);
-                    Bitmap bmp0 = DrawText(string.Concat(texts[lineIdx]), f, lineColors);
-
-                    int currentHeight = linHght;
-                    int currentLocy = locy;
-
-                    if (autoHeight)
-                    {
-                        currentHeight = (int)(1f * bmp0.Height / bmp0.Width * linWdth);
-                        if (yEdit) currentLocy -= (currentHeight - linHght) / 2;
-                    }
-
-                    using (Bitmap bmp = new Bitmap(width, height))
-                    using (Graphics gr = Graphics.FromImage(bmp))
-                    {
-                        gr.Clear(Color.Transparent);
-                        gr.DrawImage(bmp0, locx + (linWdth - bmp0.Width) / 2, currentLocy + (currentHeight - bmp0.Height) / 2);
-                        bmp.Save($"{path}\\img\\{i}.png", System.Drawing.Imaging.ImageFormat.Png);
-                    }
-
-                    bmp0.Dispose();
-                    paths.Add($"img\\{i}.png");
-                }
-
-                f.Dispose();
-                fontPage?.Dispose();
-            }
-            catch { }
+            var export = PrepareLineExport(ayahword, width, height, locx, locy, linWdth, linHght, autoHeight, yEdit, path, surah, page);
+            if (export != null) paths.AddRange(export());
         }
 
-        private Color[] GetLineColorsAtAyahWord(List<int> line, List<Color> pClrs, List<Color> wClrs, int ayah, int word)
+        internal Func<List<string>> PrepareLineExport(List<int> ayahword, int width, int height, int locx, int locy, int linWdth, int linHght,
+            bool autoHeight, bool yEdit, string path, int surah, int page)
         {
-            Color[] clrs = pClrs.ToArray();
-
-            // Binary-like search for the starting index
-            int idx = 0;
-            int pairCount = line.Count / 2;
-
-            // Linear search (acceptable since line typically contains few pairs)
-            for (int i = 0; i < pairCount; i++)
-            {
-                if (line[i * 2] == ayah && line[i * 2 + 1] == word)
-                {
-                    idx = i;
-                    break;
-                }
-            }
-
-            // Apply word colors for matching ayah and word
-            while (idx < pairCount && line[idx * 2] == ayah && line[idx * 2 + 1] == word)
-            {
-                clrs[idx] = wClrs[idx];
-                idx++;
-            }
-
-            return clrs;
+            if (!success || ayahword == null || ayahword.Count < 2 || page < 1 || page > pagesSizeUnits.Length) return null;
+            var wordLines = new Dictionary<(int, int), ExportFontLine>();
+            ExportFontLine line = ReadExportFontLines(surah, page, wordLines);
+            string fontPath = FindFontFile(page);
+            if (line == null || fontPath == null || pagesSizeUnits[page - 1] <= 0) return null;
+            int[] intervals = ayahword.ToArray();
+            float fontSize = linWdth / pagesSizeUnits[page - 1], underlineY = UnderlineY, strokeWidth = StrokeWidth;
+            bool colorFont = UseColoringFont, dark = darkMode;
+            return () => RenderLineExport(intervals, line, wordLines, fontPath, fontSize, underlineY, strokeWidth, colorFont, dark,
+                width, height, locx, locy, linWdth, linHght, autoHeight, yEdit, path);
         }
 
-        private int GetIndexLineAtAyahWord(List<List<int>> lines, int ayah, int word)
+        private static List<string> RenderLineExport(int[] intervals, ExportFontLine line, Dictionary<(int, int), ExportFontLine> wordLines,
+            string fontPath, float fontSize, float underlineY, float strokeWidth, bool colorFont, bool dark,
+            int width, int height, int locx, int locy, int linWdth, int linHght, bool autoHeight, bool yEdit, string path)
         {
-            int idx = lines.FindIndex(ln => ln[0] > ayah || (ln[0] == ayah && ln[1] >= word));
-
-            if (idx == -1)
-                idx = lines.Count - 1;
-            else if (lines[idx][0] != ayah || lines[idx][1] != word)
-                idx -= 1;
-
-            return idx;
-        }
-
-        private void GetLinesData(List<List<int>> lines, List<List<char>> texts, List<List<Color>> pColors, List<List<Color>> wColors, int surah, int page)
-        {
-            List<int> lLine = null;
-            List<char> lChars = null;
-            List<Color> lpc = null;
-            List<Color> lwc = null;
-            Color clrP, clr;
-            int previousLine = -1;
-
-            try
+            var paths = new List<string>(intervals.Length / 2);
+            using (var fontPage = new PrivateFontCollection())
             {
-                command.CommandText = $"SELECT ayah,line,word,discriminator,text FROM ayat JOIN words ON words.ayah_id = ayat.id WHERE surah={surah} AND page={page} ORDER BY line,ayah,word";
-                quran.Open();
-                reader = command.ExecuteReader();
-
-                while (reader.Read())
+                fontPage.AddFontFile(fontPath);
+                if (fontPage.Families.Length == 0) return paths;
+                using (var font = new Font(fontPage.Families[0], fontSize, GraphicsUnit.Pixel))
+                using (var renderer = new FontLineRenderer(font, colorFont ? fontPath : null, dark, underlineY, strokeWidth))
+                using (var output = new LineFrameWriter(path, width, height))
                 {
-                    int currentLine = reader.GetInt32(1);
-
-                    if (currentLine != previousLine)
+                    for (int i = 0; i < intervals.Length / 2; i++)
                     {
-                        previousLine = currentLine;
-                        lLine = new List<int>(32);
-                        lines.Add(lLine);
-                        lChars = new List<char>(32);
-                        texts.Add(lChars);
-                        lpc = new List<Color>(32);
-                        pColors.Add(lpc);
-                        lwc = new List<Color>(32);
-                        wColors.Add(lwc);
+                        var key = (intervals[i * 2], intervals[i * 2 + 1]);
+                        if (key.Item2 >= 0 && wordLines.TryGetValue(key, out ExportFontLine selected)) line = selected;
+                        if (line.Layout == null)
+                        {
+                            line.Layout = renderer.Prepare(line.Text.ToString());
+                            line.Colors = line.PageColors.ToArray();
+                        }
+                        Color[] colors = line.Colors;
+                        if (key.Item2 >= 0 && line.GlyphIndices.TryGetValue(key, out List<int> indices))
+                        {
+                            colors = (Color[])colors.Clone();
+                            foreach (int glyph in indices) colors[glyph] = line.WordColors[glyph];
+                        }
+                        using (Bitmap rendered = renderer.Draw(line.Layout, colors))
+                        {
+                            int currentHeight = autoHeight ? (int)(1f * rendered.Height / rendered.Width * linWdth) : linHght;
+                            int currentY = autoHeight && yEdit ? locy - (currentHeight - linHght) / 2 : locy;
+                            var target = new Rectangle(locx + (linWdth - rendered.Width) / 2,
+                                currentY + (currentHeight - rendered.Height) / 2, rendered.Width, rendered.Height);
+                            paths.Add(output.Write(i, rendered, target, scale: false));
+                        }
                     }
-
-                    lLine.Add(reader.GetInt32(0));
-                    lLine.Add(reader.GetInt32(2));
-
-                    int discriminator = reader.GetInt32(3);
-
-                    // Get page color
-                    if (Discriminators.KeyExists(0, discriminator))
-                        clrP = Discriminators.PageColors[discriminator];
-                    else
-                        clrP = darkMode ? Color.White : Color.Black;
-                    lpc.Add(clrP);
-
-                    // Get word color
-                    clr = Color.Empty;
-                    if (Discriminators.KeyExists(2, discriminator))
-                    {
-                        clr = Discriminators.WordColors[discriminator];
-                        if (clr.Name == "WordColor")
-                            clr = GetColor(2, darkMode);
-                    }
-
-                    if (clr.IsEmpty)
-                        clr = clrP;
-                    lwc.Add(clr);
-
-                    string text = reader.GetString(4);
-                    lChars.Add(text.Length > 0 ? text[0] : ' ');
                 }
             }
-            finally
+            return paths;
+        }
+
+        private ExportFontLine ReadExportFontLines(int surah, int page, Dictionary<(int, int), ExportFontLine> wordLines)
+        {
+            ExportFontLine first = null, line = null;
+            Color defaultColor = darkMode ? Color.White : Color.Black;
+            Color wordHighlight = GetColor(2, darkMode);
+            int previousLine = int.MinValue;
+            using (var connection = new SQLiteConnection(quran.ConnectionString))
+            using (var query = connection.CreateCommand())
             {
-                reader?.Close();
-                quran?.Close();
+                query.CommandText = @"SELECT ayah,line,word,discriminator,text FROM ayat
+                    JOIN words ON words.ayah_id=ayat.id WHERE surah=@surah AND page=@page
+                    ORDER BY line,ayah,word,words.rowid";
+                query.Parameters.AddWithValue("@surah", surah);
+                query.Parameters.AddWithValue("@page", page);
+                connection.Open();
+                using (var rows = query.ExecuteReader())
+                    while (rows.Read())
+                    {
+                        int number = rows.GetInt32(1);
+                        if (number != previousLine)
+                        {
+                            previousLine = number;
+                            line = new ExportFontLine();
+                            if (first == null) first = line;
+                        }
+                        var key = (rows.GetInt32(0), rows.GetInt32(2));
+                        if (!wordLines.ContainsKey(key)) wordLines.Add(key, line);
+                        if (!line.GlyphIndices.TryGetValue(key, out List<int> indices))
+                            line.GlyphIndices.Add(key, indices = new List<int>());
+                        indices.Add(line.Text.Length);
+
+                        int discriminator = rows.GetInt32(3);
+                        if (!Discriminators.PageColors.TryGetValue(discriminator, out Color pageColor)) pageColor = defaultColor;
+                        if (Discriminators.WordColors.TryGetValue(discriminator, out Color wordColor) && wordColor.Name == "WordColor")
+                            wordColor = wordHighlight;
+                        line.PageColors.Add(pageColor);
+                        line.WordColors.Add(wordColor.IsEmpty ? pageColor : wordColor);
+
+                        string glyph = rows.GetString(4);
+                        line.Text.Append(glyph.Length > 0 ? glyph[0] : ' ');
+                    }
             }
+            return first;
         }
 
         public Bitmap DrawText(string text, Font font, Color[] colors = null)
         {
-            if (UseColoringFont && !string.IsNullOrEmpty(text))
-            {
-                Bitmap skiaResult = DrawTextWithSkiaSharp(text, font, colors);
-                if (skiaResult != null)
-                    return skiaResult;
-            }
-
-            // Fallback to GDI+ rendering
-            return DrawTextWithGDI(text, font, colors);
-        }
-
-        private Bitmap DrawTextWithSkiaSharp(string text, Font font, Color[] colors = null)
-        {
-            if (string.IsNullOrEmpty(text))
-                return new Bitmap(1, 1);
-
-            string fontPath = Path.Combine(path, $"{PageNumber.ToString().PadLeft(3, '0')}{Extension}");
-            if (!File.Exists(fontPath))
-            {
-                fontPath = Path.Combine(path, $"{PageNumber}{Extension}");
-            }
-            if (!File.Exists(fontPath))
-            {
-                return null; // Fallback to GDI+
-            }
-
-            SKTypeface typeface = SKTypeface.FromFile(fontPath);
-
-            SKPaint paint = new SKPaint
-            {
-                IsAntialias = true,
-                Typeface = typeface,
-                TextSize = font.Size,
-                SubpixelText = true,
-                LcdRenderText = true
-            };
-
-            float width = 0;
-            float height = paint.FontMetrics.Descent - paint.FontMetrics.Ascent;
-
-            float[] charWidths = new float[text.Length];
-
-            for (int i = 0; i < text.Length; i++)
-            {
-                charWidths[i] = paint.MeasureText(text[i].ToString());
-                width += charWidths[i];
-            }
-
-            int bmpWidth = (int)Math.Ceiling(width);
-            int bmpHeight = (int)Math.Ceiling(height);
-
-            SKImageInfo info = new SKImageInfo(bmpWidth, bmpHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
-
-            SKSurface surface = SKSurface.Create(info);
-            SKCanvas canvas = surface.Canvas;
-
-            canvas.Clear(SKColors.Transparent);
-
-            bool hasColors = colors != null && colors.Length == text.Length;
-
-            float x = bmpWidth;
-            float baseline = -paint.FontMetrics.Ascent;
-
-            for (int i = 0; i < text.Length; i++)
-            {
-                float w = charWidths[i];
-                x -= w;
-
-                Color c = hasColors ? colors[i] : (darkMode ? Color.White : Color.Black);
-
-                bool isWhite = c.R == 255 && c.G == 255 && c.B == 255;
-                bool isBlack = c.R == 0 && c.G == 0 && c.B == 0;
-                bool shouldUnderline = !isWhite && !isBlack;
-
-                paint.Color = new SKColor(c.R, c.G, c.B, c.A);
-
-                canvas.DrawText(text[i].ToString(), x, baseline, paint);
-
-                if (shouldUnderline)
-                {
-                    paint.StrokeWidth = StrokeWidth;
-                    float underlineY = baseline + UnderlineY;
-
-                    canvas.DrawLine(x, underlineY, x + w, underlineY, paint);
-                }
-            }
-
-            SKImage img = surface.Snapshot();
-            SKData data = img.Encode(SKEncodedImageFormat.Png, 100);
-
-            MemoryStream ms = new MemoryStream(data.ToArray());
-            Bitmap bmp = new Bitmap(ms);
-
-            if (darkMode)
-                for (int y = 0; y < bmp.Height; y++)
-                    for (int x0 = 0; x0 < bmp.Width; x0++)
-                    {
-                        Color c = bmp.GetPixel(x0, y);
-                        if (c.R < 40 && c.G < 40 && c.B < 40 && c.A > 0)
-                            bmp.SetPixel(x0, y, Color.FromArgb(c.A, 255 - c.R, 255 - c.G, 255 - c.B));
-                    }
-
-            data.Dispose();
-            img.Dispose();
-            surface.Dispose();
-            paint.Dispose();
-            typeface.Dispose();
-
-            return bmp;
-        }
-
-        private Bitmap DrawTextWithGDI(string text, Font font, Color[] colors = null)
-        {
-            if (string.IsNullOrEmpty(text))
-                return new Bitmap(1, 1);
-
-            StringFormat sf = new StringFormat { Trimming = StringTrimming.Character };
-            SizeF textSize;
-
-            using (Bitmap imgT = new Bitmap(1, 1))
-            using (Graphics drawingT = Graphics.FromImage(imgT))
-            {
-                textSize = drawingT.MeasureString(text, font);
-            }
-
-            int width = (int)textSize.Width;
-            Bitmap img = new Bitmap(width, (int)textSize.Height);
-
-            using (Graphics drawing = Graphics.FromImage(img))
-            {
-                drawing.CompositingQuality = CompositingQuality.HighQuality;
-                drawing.InterpolationMode = InterpolationMode.HighQualityBilinear;
-                drawing.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                drawing.SmoothingMode = SmoothingMode.HighQuality;
-                drawing.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-                drawing.Clear(Color.Transparent);
-
-                bool hasColors = colors?.Length == text.Length;
-                float xPos = width;
-
-                // Pre-calculate all character widths
-                int[] charWidths = new int[text.Length];
-                using (Bitmap tmpBmp = new Bitmap(1, 1))
-                using (Graphics tmpGfx = Graphics.FromImage(tmpBmp))
-                {
-                    for (int i = 0; i < text.Length; i++)
-                    {
-                        SizeF charSize = tmpGfx.MeasureString(text[i].ToString(), font);
-                        charWidths[i] = (int)charSize.Width;
-                    }
-                }
-
-                // Draw characters with kerning adjustment
-                for (int i = 0; i < text.Length; i++)
-                {
-                    int charWidth = charWidths[i];
-                    int kernAdjust = 0;
-
-                    if (i > 0 && i < text.Length)
-                    {
-                        using (Bitmap tmpBmp = new Bitmap(1, 1))
-                        using (Graphics tmpGfx = Graphics.FromImage(tmpBmp))
-                        {
-                            SizeF pairSize = tmpGfx.MeasureString(text[i - 1] + text[i].ToString(), font);
-                            kernAdjust = (int)pairSize.Width - charWidths[i - 1] - charWidth;
-                        }
-                        charWidth += kernAdjust;
-                    }
-
-                    xPos -= charWidth;
-
-                    Color drawColor = hasColors ? colors[i] : (darkMode ? Color.White : Color.Black);
-                    using (Brush textBrush = new SolidBrush(drawColor))
-                    {
-                        drawing.DrawString(text[i].ToString(), font, textBrush, new PointF(xPos, 0), sf);
-                    }
-                }
-            }
-
-            return img;
+            if (string.IsNullOrEmpty(text)) return new Bitmap(1, 1);
+            using (var renderer = new FontLineRenderer(font, UseColoringFont ? FindFontFile(PageNumber) : null, darkMode, UnderlineY, StrokeWidth))
+                return renderer.Draw(renderer.Prepare(text), colors);
         }
         #endregion
 

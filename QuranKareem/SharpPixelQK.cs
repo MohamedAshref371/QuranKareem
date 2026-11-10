@@ -17,7 +17,7 @@ public class SharpPixelQK
     public int Width { get; }
     public int Height { get; }
     public bool IsAlphaBitmap { get; }
-    public Bitmap Bitmap { get; }
+    public Bitmap Bitmap { get; private set; }
 
     public SharpPixelQK(Bitmap bitmap, bool withOriginal = false)
     {
@@ -32,6 +32,16 @@ public class SharpPixelQK
         rgbValues = new byte[bytes];
 
         this.withOriginal = withOriginal ? 1 : 0;
+    }
+
+    internal bool TryUseBitmap(Bitmap bitmap)
+    {
+        if (locked || bitmap.Width != Width || bitmap.Height != Height || bitmap.PixelFormat != Bitmap.PixelFormat)
+            return false;
+
+        Bitmap = bitmap;
+        if (withOriginal == 2) withOriginal = 1; // Take a fresh original snapshot on the next lock.
+        return true;
     }
 
     public void Lock()
@@ -50,8 +60,9 @@ public class SharpPixelQK
             
         if (withOriginal == 1)
         {
-            rgbValuesCopy = (byte[])rgbValues.Clone();
-            rgbValuesCopy2 = new byte[rgbValues.Length];
+            if (rgbValuesCopy == null) rgbValuesCopy = new byte[rgbValues.Length];
+            if (rgbValuesCopy2 == null) rgbValuesCopy2 = new byte[rgbValues.Length];
+            Array.Copy(rgbValues, rgbValuesCopy, rgbValues.Length);
             withOriginal = 2;
         }
 

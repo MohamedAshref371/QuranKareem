@@ -23,8 +23,12 @@ namespace QuranKareem
         {
             quran = new SQLiteConnection();
             command = new SQLiteCommand(quran);
-            timer.Tick += Timer_Tick;
-            wordsTimer.Tick += WordsTimer_Tick;
+            playbackTimer.Tick += PlaybackTick;
+            mp3.PlayStateChange += (sender, e) =>
+            {
+                if (CapturedAudio && e.newState == (int)WMPLib.WMPPlayState.wmppsMediaEnded)
+                    mediaEnded = true;
+            };
         }
         #endregion
 
@@ -55,8 +59,6 @@ namespace QuranKareem
                 else if (value < 0.6) rate = 0.6;
                 else rate = value;
                 mp3.settings.rate = rate;
-                if (timer.Enabled && To - mp3.Ctlcontrols.currentPosition * 1000 > 0) timer.Interval = (int)((To - mp3.Ctlcontrols.currentPosition * 1000) / rate);
-                mp3.Ctlcontrols.currentPosition = mp3.Ctlcontrols.currentPosition;
             }
         }
 
@@ -70,10 +72,11 @@ namespace QuranKareem
             }
         }
 
-        private readonly Timer timer = new Timer(); private bool setPosEnabled = true;
+        private readonly Timer playbackTimer = new Timer { Interval = 20 };
         private readonly AxWMPLib.AxWindowsMediaPlayer mp3 = new AxWMPLib.AxWindowsMediaPlayer();
-
-        private readonly Timer wordsTimer = new Timer();
+        private int? pendingSeek;
+        private bool paused, mediaEnded;
+        private event EventHandler AyahChanged, WordChanged;
         public int CurrentWord { get; private set; } = -1;
         public bool WordMode { get; set; } = true;
         private bool isWordTableEmpty = true;
@@ -99,10 +102,9 @@ namespace QuranKareem
 
             if (!File.Exists(path + "000.db") && !File.Exists(path + "0.db")) return;
 
-            this.path = path; success = false;
-
+            Stop();
+            this.path = path;
             SurahNumber = 0;
-            timer.Stop(); setPosEnabled = true;
 
             try
             {
@@ -152,10 +154,10 @@ namespace QuranKareem
         /// <returns>true if everything goes well.</returns>
         public bool Set(int surah = 0, int ayah = -2, bool next = false)
         {
-            if (!timer.Enabled) setPosEnabled = true;
-            if (setPosEnabled) RepeatReset();
-            timer.Stop(); wordsTimer.Stop();
             if (!success) return false;
+            playbackTimer.Stop();
+            bool seek = !next;
+            if (seek) RepeatReset();
 
             #region SQL Building
             StrBuilder.Length = 0;
@@ -195,21 +197,24 @@ namespace QuranKareem
                 if (AyahRepeatCounter < AyahRepeat - 1 && AyahNumber != 0)
                 {
                     AyahRepeatCounter += 1;
-                    setPosEnabled = true;
+                    seek = true;
                     StrBuilder.Append($"id={ayahId}");
                 }
                 else if (AyahNumber == AyatCount && SurahRepeatCounter < SurahRepeat - 1)
                 {
                     SurahRepeatCounter += 1;
                     AyahRepeatCounter = 0;
-                    setPosEnabled = true;
+                    seek = true;
                     StrBuilder.Append($"surah={SurahNumber} AND ayah>=0");
                 }
                 else
                 {
                     AyahRepeatCounter = 0;
                     if (SurahNumber == SurahsCount && AyahNumber == AyatCount)
+                    {
+                        seek = true;
                         StrBuilder.Append("ayah>=0");
+                    }
                     else
                         StrBuilder.Append($"id>{ayahId} AND ayah>=0");
                 }
@@ -239,20 +244,23 @@ namespace QuranKareem
             reader.Close(); quran.Close();
             #endregion
 
-            if (surah != SurahNumber || !CapturedAudio || mp3.Ctlcontrols.currentPosition == 0)
+            if (surah != SurahNumber || !CapturedAudio)
             {
-                ResetSurahSplitter();
-                if (!CaptureAudio(surah))
-                {
-                    mp3.URL = "";
-                    return false;
-                }
+                if (!CaptureAudio(surah)) return false;
                 SurahData(surah);
+                seek = true;
             }
+            else if (seek && (paused || mediaEnded))
+                mp3.Ctlcontrols.play();
+            paused = false;
+            if (seek) mediaEnded = false;
             ayahId = id;
             AyahNumber = ayah;
 
-            AyahData();
+            LoadWordTimings();
+            CurrentWord = -1;
+            pendingSeek = seek ? (int?)Math.Max(0, From) : null;
+            playbackTimer.Start();
             return true;
         }
 
@@ -268,85 +276,39 @@ namespace QuranKareem
             reader.Close(); quran.Close();
         }
 
-        private void AyahData()
+        private struct WordTiming
         {
-            if (To <= 0 && AyahNumber > 0)
-            {
-                if (setPosEnabled && From > 0) mp3.Ctlcontrols.currentPosition = From / 1000.0;
-                setPosEnabled = true;
-                return;
-            }
+            public int Word, Start, End;
+        }
+
+        private readonly List<WordTiming> wordTimings = new List<WordTiming>();
+        private void LoadWordTimings()
+        {
+            wordTimings.Clear();
+            if (isWordTableEmpty) return;
 
             quran.Open();
-            double curr = mp3.Ctlcontrols.currentPosition * 1000;
-            int num = (int)((To - ((setPosEnabled || curr == 0) ? From : curr)) / rate);
-            timer.Interval = (num > 0) ? num : 1;
-
-            if (setPosEnabled) mp3.Ctlcontrols.currentPosition = From / 1000.0;
-
-            words.Clear(); fullWords.Clear();
-            CurrentWord = -1; idWord = 0;
-            if (WordMode && !isWordTableEmpty)
+            try
             {
-                int wordCount;
-                command.CommandText = $"SELECT word FROM words WHERE ayah_id={ayahId} ORDER BY word DESC";
-                reader = command.ExecuteReader();
-                if (reader.HasRows)
-                {
-                    reader.Read();
-                    wordCount = reader.GetInt32(0);
-                    reader.Close();
-                    command.Cancel();
-                    command.CommandText = $"SELECT word,timestamp_from FROM words WHERE ayah_id={ayahId} GROUP BY word";
-                    reader = command.ExecuteReader();
-                    for (int i = 0; i < wordCount; i++) words.Add(-1);
-                    while (reader.Read()) words[reader.GetInt32(0) - 1] = reader.GetInt32(1);
-                    reader.Close();
-                    command.Cancel();
-
-                    command.CommandText = $"SELECT word,timestamp_from,timestamp_to FROM words WHERE ayah_id={ayahId}";
-                    reader = command.ExecuteReader();
-                    while (reader.Read()) fullWords.AddRange(new int[] { reader.GetInt32(0), reader.GetInt32(1), reader.GetInt32(2) });
-                }
-                reader.Close();
+                command.CommandText = $"SELECT word,timestamp_from,timestamp_to FROM words WHERE ayah_id={ayahId} AND word>0 AND timestamp_from>=0 AND timestamp_to>timestamp_from ORDER BY timestamp_from,word";
+                using (SQLiteDataReader timings = command.ExecuteReader())
+                    while (timings.Read())
+                        wordTimings.Add(new WordTiming { Word = timings.GetInt32(0), Start = timings.GetInt32(1), End = timings.GetInt32(2) });
             }
-            quran.Close();
-            setPosEnabled = true;
-            timer.Start();
-            if (WordMode && !isWordTableEmpty) Words();
+            finally { quran.Close(); }
         }
 
-        private int idWord = 0;
-        private readonly List<int> words = new List<int>(), fullWords = new List<int>();
         public void WordOf(int word)
         {
-            if (success && WordMode && !isWordTableEmpty && timer.Enabled && word > 0 && word <= words.Count && words[word - 1] >= 0 && To - words[word - 1] > 0)
+            if (!success || !WordMode || !playbackTimer.Enabled || word < 1) return;
+            foreach (WordTiming timing in wordTimings)
             {
-                wordsTimer.Stop();
-                timer.Interval = (int)((To - words[word - 1]) / rate);
-                mp3.Ctlcontrols.currentPosition = words[word - 1] / 1000.0;
-                idWord = 0;
-                Words();
-            }
-        }
-        
-        private void Words()
-        {
-            wordsTimer.Stop();
-            CurrentWord = -1;
-            wordsTimer.Interval = 100;
-            int num = (int)(mp3.Ctlcontrols.currentPosition * 1000); // Error At Program Closing
-            for (int i = idWord; i < fullWords.Count / 3; i++)
-            {
-                if (num >= fullWords[i * 3 + 1] && num < fullWords[i * 3 + 2])
+                if (timing.Word == word && timing.Start < To)
                 {
-                    wordsTimer.Interval = fullWords[i * 3 + 2] - num > 0 ? fullWords[i * 3 + 2] - num : 1;
-                    CurrentWord = fullWords[i * 3];
-                    idWord++;
-                    break;
+                    pendingSeek = timing.Start;
+                    return;
                 }
             }
-            wordsTimer.Start();
         }
 
         public bool Check(int delta = 0)
@@ -369,54 +331,118 @@ namespace QuranKareem
         public bool CapturedAudio = false;
         bool CaptureAudio(int sura)
         {
-            string s = sura + "";
-            if (s.Length == 1) s = "00" + s;
-            else if (s.Length == 2) s = "0" + s;
-            s += Extension;
-            CapturedAudio = true;
-            if (File.Exists(path + s)) mp3.URL = path + s;
-            else if (File.Exists(path + sura + Extension)) mp3.URL = path + sura + Extension;
-            else
+            string source = FindSurahAudio(sura);
+            if (source == null)
             {
-                CapturedAudio = false;
-                string[] filesName = Directory.GetFiles(path);
-                for (int i = 0; i < filesName.Length; i++)
-                {
-                    if (filesName[i].Split('\\').Last().Contains(sura.ToString().PadLeft(3, '0')))
-                    {
-                        mp3.URL = filesName[i];
-                        CapturedAudio = true;
-                    }
-                }
+                OneTimePause();
+                return false;
             }
+            CapturedAudio = true;
+            mp3.URL = source;
             mp3.settings.rate = rate;
-            return CapturedAudio;
+            return true;
+        }
+
+        private string FindSurahAudio(int surah)
+        {
+            if (!Directory.Exists(path)) return null;
+            string number = surah.ToString("D3");
+            string numbered = Path.Combine(path, number + Extension);
+            if (File.Exists(numbered)) return numbered;
+            numbered = Path.Combine(path, surah + Extension);
+            if (File.Exists(numbered)) return numbered;
+            string alternate = Directory.EnumerateFiles(path, "*" + Extension)
+                .LastOrDefault(file => Path.GetFileNameWithoutExtension(file).Contains(number));
+            if (alternate != null) return alternate;
+            // Older exports could contain WAV files while the database still listed MP3.
+            return Directory.EnumerateFiles(path).LastOrDefault(file =>
+                Path.GetFileNameWithoutExtension(file).Contains(number) &&
+                (Path.GetExtension(file).Equals(".wav", StringComparison.OrdinalIgnoreCase) ||
+                 Path.GetExtension(file).Equals(".mp3", StringComparison.OrdinalIgnoreCase)));
         }
         #endregion
 
         public void OneTimePause()
         {
-            timer.Stop(); wordsTimer.Stop();
-            mp3.URL = ""; CapturedAudio = false;
+            playbackTimer.Stop();
+            pendingSeek = null;
+            paused = mediaEnded = false;
+            bool hadAudio = CapturedAudio;
+            CapturedAudio = false;
+            if (hadAudio) mp3.URL = "";
         }
 
-        public void Pause()
+        public bool Pause()
         {
-            timer.Stop(); wordsTimer.Stop();
-            mp3.Ctlcontrols.pause(); CapturedAudio = false;
+            if (!CapturedAudio || paused) return false;
+            playbackTimer.Stop();
+            paused = true;
+            mp3.Ctlcontrols.pause();
+            return true;
         }
+
+        public bool Resume(int surah, int ayah)
+        {
+            if (!paused || !CapturedAudio || surah != SurahNumber || ayah != AyahNumber) return false;
+            paused = false;
+            mp3.Ctlcontrols.play();
+            playbackTimer.Start();
+            return true;
+        }
+
         public void Stop()
         {
             success = false;
-            timer.Stop(); wordsTimer.Stop();
-            mp3.URL = ""; CapturedAudio = false;
+            OneTimePause();
+            CurrentWord = -1;
         }
 
-        void Timer_Tick(object sender, EventArgs e) { setPosEnabled = false; Set(next: true); }
-        void WordsTimer_Tick(object sender, EventArgs e) => Words();
+        private void PlaybackTick(object sender, EventArgs e)
+        {
+            if (!CapturedAudio || paused) return;
+            bool playing = mp3.playState == WMPLib.WMPPlayState.wmppsPlaying;
+            if (pendingSeek.HasValue)
+            {
+                // WMP does not reliably accept a position until the media has started.
+                if (playing)
+                {
+                    int target = pendingSeek.Value;
+                    pendingSeek = null;
+                    mediaEnded = false;
+                    mp3.Ctlcontrols.currentPosition = target / 1000.0;
+                }
+                return;
+            }
 
-        public void AddEventHandlerOfAyah(EventHandler eH) => timer.Tick += eH;
-        public void AddEventHandlerOfWord(EventHandler eH) => wordsTimer.Tick += eH;
+            if (!playing && !mediaEnded) return;
+            double position = mediaEnded ? Mp3Duration() * 1000 : Mp3CurrentPosition() * 1000;
+            bool advanced = false;
+            // Catch up after a busy UI without displaying each expired ayah.
+            for (int step = 0; step < 32; step++)
+            {
+                if ((To <= 0 && AyahNumber > 0) || (position < To && !(mediaEnded && AyahNumber == AyatCount))) break;
+                if (!Set(next: true)) break;
+                advanced = true;
+                if (pendingSeek.HasValue) break; // repeat, wrap, or a new recording
+            }
+            if (advanced) AyahChanged?.Invoke(this, EventArgs.Empty);
+            if (mediaEnded) playbackTimer.Stop();
+            if (!CapturedAudio || pendingSeek.HasValue || (To > 0 && position >= To)) return;
+
+            int word = -1;
+            if (WordMode)
+                foreach (WordTiming timing in wordTimings)
+                {
+                    if (timing.Start > position) break;
+                    if (position < timing.End) word = timing.Word;
+                }
+            if (CurrentWord == word) return;
+            CurrentWord = word;
+            WordChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        public void AddEventHandlerOfAyah(EventHandler eH) => AyahChanged += eH;
+        public void AddEventHandlerOfWord(EventHandler eH) => WordChanged += eH;
 
         int SurahRepeat = 1, AyahRepeat = 1, SurahRepeatCounter = 0, AyahRepeatCounter = 0;
         public void Repeat(int SurahRepeat = 1, int AyahRepeat = 1)
@@ -430,28 +456,27 @@ namespace QuranKareem
             AyahRepeatCounter = 0;
         }
 
-        byte[] surahArray = null; int start = -1, unit;
-        private void ResetSurahSplitter()
+        public AudioQuranSplitter PrepareSurahSplit()
         {
-            surahArray = null;
-            start = -1;
-        }
-        public void SurahSplitter()
-        {
-            if (!success || mp3.URL == "" || To <= From || mp3.currentMedia.duration == 0) return;
-            if (!Directory.Exists("splits")) Directory.CreateDirectory("splits");
-            if (surahArray == null) surahArray = File.ReadAllBytes(mp3.URL);
+            if (!success || SurahNumber < 1) return null;
+            int surah = SurahNumber;
+            string source = FindSurahAudio(surah);
+            if (source == null) return null;
 
-            if (start == -1)
+            var verses = new List<AudioVerseRange>();
+            using (var query = new SQLiteCommand("SELECT ayah, timestamp_from, timestamp_to FROM ayat WHERE surah=@surah AND ayah>=1 ORDER BY ayah", quran))
             {
-                unit = Convert.ToInt32(mp3.currentMedia.getItemInfo("Bitrate")) / 8000;
-                start = (int)(surahArray.Length - unit * mp3.currentMedia.duration * 1000);
-                if (start < 0) start = 0;
+                query.Parameters.AddWithValue("@surah", surah);
+                quran.Open();
+                try
+                {
+                    using (SQLiteDataReader rows = query.ExecuteReader())
+                        while (rows.Read())
+                            verses.Add(new AudioVerseRange(rows.GetInt32(0), rows.IsDBNull(1) ? 0 : rows.GetInt32(1), rows.IsDBNull(2) ? 0 : rows.GetInt32(2)));
+                }
+                finally { quran.Close(); }
             }
-
-            byte[] ayah = new byte[unit * (To - From)];
-            Array.Copy(surahArray, start + unit * From, ayah, 0, ayah.Length);
-            File.WriteAllBytes($@"splits\S{SurahNumber.ToString().PadLeft(3, '0')}A{AyahNumber.ToString().PadLeft(3, '0')}{Extension}", ayah);
+            return new AudioQuranSplitter(source, surah, verses);
         }
 
         public float[] WordsList(int ayahStart, int ayahEnd, out string mp3Url, List<int> ayahword, List<float> timestamps)
@@ -554,6 +579,27 @@ namespace QuranKareem
             return timestamps;
         }
 
+        internal IReadOnlyList<(int Ayah, int From, int To)> GetSubtitleTimings(int surah, int firstAyah, int lastAyah)
+        {
+            var timings = new List<(int, int, int)>();
+            if (!success) return timings;
+            var settings = new SQLiteConnectionStringBuilder(quran.ConnectionString) { ReadOnly = true, FailIfMissing = true };
+            using (var connection = new SQLiteConnection(settings.ConnectionString))
+            using (var query = new SQLiteCommand(@"SELECT ayah,timestamp_from,timestamp_to FROM ayat
+                WHERE surah=@surah AND ayah BETWEEN @first AND @last AND timestamp_from>=0
+                AND timestamp_to>timestamp_from ORDER BY ayah,id", connection))
+            {
+                query.Parameters.AddWithValue("@surah", surah);
+                query.Parameters.AddWithValue("@first", Math.Max(0, firstAyah));
+                query.Parameters.AddWithValue("@last", lastAyah);
+                connection.Open();
+                using (var rows = query.ExecuteReader())
+                    while (rows.Read())
+                        timings.Add((rows.GetInt32(0), rows.GetInt32(1), rows.GetInt32(2)));
+            }
+            return timings;
+        }
+
         #region إضافة شيخ جديد
         public bool NewQuranAudio(string path)
         {
@@ -562,10 +608,8 @@ namespace QuranKareem
             try { path = Path.GetFullPath(path); } catch { return false; }
             if (path.Substring(path.Length - 1) != "\\") { path += "\\"; }
 
-            this.path = path; success = false;
-
-            CapturedAudio = false;
-            timer.Stop(); setPosEnabled = true;
+            Stop();
+            this.path = path;
             try
             {
                 if (!File.Exists(path + "000.db") && !File.Exists(path + "0.db"))
@@ -643,14 +687,23 @@ namespace QuranKareem
             quran.Close();
         }
 
-        public void SetDescription(string extension, string comment)
+        public bool SetDescription(string extension, string comment)
         {
-            if (!success) return;
-            quran.Open();
-            command.CommandText = $"UPDATE description SET extension='{extension}', comment='{comment}'; VACUUM;";
-            command.ExecuteNonQuery();
-            quran.Close();
-            Extension = extension; Comment = comment;
+            if (!success) return false;
+
+            var settings = new SQLiteConnectionStringBuilder(quran.ConnectionString) { FailIfMissing = true };
+            using (var connection = new SQLiteConnection(settings.ConnectionString))
+            using (var update = new SQLiteCommand("UPDATE description SET extension = @extension, comment = @comment WHERE type = 3", connection))
+            {
+                update.Parameters.AddWithValue("@extension", extension ?? "");
+                update.Parameters.AddWithValue("@comment", comment ?? "");
+                connection.Open();
+                if (update.ExecuteNonQuery() != 1) return false;
+            }
+
+            Extension = extension ?? "";
+            Comment = comment ?? "";
+            return true;
         }
 
         public double Mp3CurrentPosition() => mp3.Ctlcontrols.currentPosition;

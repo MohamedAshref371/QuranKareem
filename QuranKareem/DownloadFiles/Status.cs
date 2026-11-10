@@ -10,5 +10,6 @@ namespace QuranKareem
         Downloaded,
         Exist,
         Error,
+        Canceled,
     }
 }

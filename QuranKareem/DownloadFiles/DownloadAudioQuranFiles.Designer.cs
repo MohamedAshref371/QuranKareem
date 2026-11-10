@@ -55,7 +55,7 @@
             this.fileViewPage.RightToLeft = System.Windows.Forms.RightToLeft.No;
             this.fileViewPage.Size = new System.Drawing.Size(800, 555);
             this.fileViewPage.TabIndex = 0;
-            this.fileViewPage.Text = "قائمة الملفات الصوتية للشيخ";
+            this.fileViewPage.Text = "ملفات القارئ";
             this.fileViewPage.UseVisualStyleBackColor = true;
             // 
             // fileDownloadPage
@@ -66,7 +66,7 @@
             this.fileDownloadPage.RightToLeft = System.Windows.Forms.RightToLeft.No;
             this.fileDownloadPage.Size = new System.Drawing.Size(800, 555);
             this.fileDownloadPage.TabIndex = 0;
-            this.fileDownloadPage.Text = "قائمة الملفات المنتظرة للتحميل";
+            this.fileDownloadPage.Text = "طابور التحميل";
             this.fileDownloadPage.UseVisualStyleBackColor = true;
             // 
             // flowLayoutPanel
@@ -89,7 +89,7 @@
             this.MaximizeBox = false;
             this.Name = "DownloadAudioQuranFiles";
             this.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-            this.Text = "Download Audio Quran Files";
+            this.Text = "تحميل التلاوات";
             this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.DownloadAudioQuranFiles_FormClosing);
             this.tabControl.ResumeLayout(false);
             this.fileDownloadPage.ResumeLayout(false);

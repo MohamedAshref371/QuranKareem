@@ -4,7 +4,6 @@ using System.IO;
 using System.Drawing;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using static QuranKareem.Coloring;
 
 namespace QuranKareem
@@ -59,6 +58,8 @@ namespace QuranKareem
         private SharpPixelQK spQuranPicture;
         public Bitmap CurrentPicture { get; private set; }
         public Bitmap PagePicture { get; private set; }
+        // The view borrows CurrentPicture and must switch to the replacement before the old image is disposed.
+        public event EventHandler PictureReplaced;
         #endregion
 
         #region Words
@@ -69,7 +70,6 @@ namespace QuranKareem
         private bool isWordsDiscriminatorEmpty = false;
         #endregion
 
-        private readonly StringBuilder str = new StringBuilder();
 
         private bool darkMode = false;
         public bool DarkMode
@@ -155,15 +155,14 @@ namespace QuranKareem
                 DiscriminatorsReader();
                 Discriminators.GetDiscriminators(path + "Colors.txt");
                 isWordsDiscriminatorEmpty = !Discriminators.ActiveDiscriminators(darkMode);
-                CurrentPicture = new Bitmap(Width, Height);
-                PagePicture = CurrentPicture;
+                SurahNumber = 0;
                 GetInitialColors();
                 if (darkMode)
                 {
                     if (background.A != 0) background = Color.FromArgb(background.A, 255 - background.R, 255 - background.G, 255 - background.B);
                     if (!textColor.IsEmpty) textColor = Color.FromArgb(255 - background.R, 255 - background.G, 255 - background.B);
                 }
-                Set(sura, aya);
+                success = Set(sura, aya);
             }
             return success;
         }
@@ -213,122 +212,35 @@ namespace QuranKareem
         {
             if (!success) return false;
 
-            #region SQL Building
-            str.Length = 0;
-            str.Append("SELECT id,surah,quarter,page,ayah FROM ayat WHERE ");
-            #region Surah and Ayah
-            // Ayah
-            if ((surah <= 0 || surah == SurahNumber) && ayah >= -1)
-            {
-                if (ayah == AyatCount + 1)
-                {
-                    surah = SurahNumber != SurahsCount ? SurahNumber + 1 : 1;
-                    ayah = 0;
-                }
-                else if (ayah > AyatCount + 1)
-                {
-                    surah = SurahNumber;
-                    ayah = AyatCount;
-                }
-                else
-                    surah = SurahNumber;
-
-                if (ayah < 0) ayah = 0;
-                str.Append($"surah >= {surah} AND ayah >= {ayah}");
-            }
-
-            // Surah and Ayah
-            else if (surah >= 1 && surah <= SurahsCount + 1)
-            {
-                if (surah == SurahsCount + 1) surah = 1;
-                if (ayah < 0) ayah = 0;
-                str.Append($"surah >= {surah} AND ayah >= {ayah}");
-            }
-
-            // Ayah Plus
-            else if (next && SurahNumber > 0)
-            {
-                if (SurahNumber == SurahsCount && AyahNumber == AyatCount)
-                    str.Append("ayah >= 0");
-                else
-                    str.Append($"id > {ayahId} AND ayah >= 0");
-            }
-            #endregion
-            #region Juz, Hizb, Quarter and Page
-            // Juz then Hizb and Quarter
-            else if (juz >= 1 && juz <= 31)
-            {
-                if (juz == 31) juz = 1;
-                if (quarter <= 0 || quarter > 8) quarter = 1;
-                if (hizb == 2 && quarter >= 1 && quarter <= 4) quarter += 4;
-
-                str.Append($"quarter >= {juz * 8 - 8 + quarter} AND ayah >= 0");
-            }
-
-            // Hizb then Quarter
-            else if (hizb >= 1 && hizb <= 61)
-            {
-                if (hizb == 61) hizb = 1;
-                if (quarter <= 0 || quarter > 4) quarter = 1;
-
-                str.Append($"quarter >= {hizb * 4 - 4 + quarter} AND ayah >= 0");
-            }
-
-            // Quarter only
-            else if (quarter >= 1 && quarter <= 241)
-            {
-                if (quarter == 241) quarter = 1;
-                str.Append($"quarter >= {quarter} AND ayah >= 0");
-            }
-
-            // Page
-            else if (page >= 1 && page <= PagesCount + 1)
-            {
-                if (page == PagesCount + 1) page = 1;
-                str.Append($"page >= {page} AND ayah >= 0");
-            }
-            #endregion
-            else
-            {
-                str.Append($"surah >= {SurahNumber} AND ayah >= {AyahNumber}");
-            }
-            str.Append(" LIMIT 1");
-            #endregion
-
-            #region SQL Execution
             quran.Open();
-            command.CommandText = str.ToString();
-            reader = command.ExecuteReader();
-            if (!reader.Read())
+            try
             {
-                reader.Close(); quran.Close();
-                return false;
+                VisualAyah? match = VisualQuranNavigation.Find(quran, this, SurahsCount, PagesCount, ayahId,
+                    surah, ayah, next, juz, hizb, quarter, page);
+                if (!match.HasValue) return false;
+
+                VisualAyah verse = match.Value;
+                if (verse.Page != PageNumber || spQuranPicture == null) PictureAt(verse.Page);
+                if (verse.Surah != SurahNumber) SurahData(verse.Surah);
+                ayahId = verse.Id;
+                QuarterNumber = verse.Quarter;
+                AyahNumber = verse.Ayah;
+                AyahData();
+                return true;
             }
-            ayahId = reader.GetInt32(0);
-            surah = reader.GetInt32(1);
-            QuarterNumber = reader.GetInt32(2);
-            page = reader.GetInt32(3);
-            AyahNumber = reader.GetInt32(4);
-            reader.Close(); quran.Close();
-            #endregion
-
-            if (surah != SurahNumber) SurahData(surah);
-            if (page != PageNumber) PictureAt(page);
-            AyahData();
-
-            return true;
+            finally { quran.Close(); }
         }
 
         private void SurahData(int surah)
         {
-            SurahNumber = surah;
             command.CommandText = $"SELECT makya_madanya,ayat_count FROM surahs WHERE id={surah}";
-            quran.Open();
-            reader = command.ExecuteReader();
-            reader.Read();
-            Makya_Madanya = reader.GetBoolean(0);
-            AyatCount = reader.GetInt32(1);
-            reader.Close(); quran.Close();
+            using (SQLiteDataReader rows = command.ExecuteReader())
+            {
+                rows.Read();
+                Makya_Madanya = rows.GetBoolean(0);
+                AyatCount = rows.GetInt32(1);
+                SurahNumber = surah;
+            }
         }
 
         private void AyahData()
@@ -339,34 +251,66 @@ namespace QuranKareem
 
             if (WordMode && !isWordTableEmpty)
             {
-                quran.Open();
                 command.CommandText = $"SELECT word FROM words WHERE ayah_id={ayahId} AND word<=599 ORDER BY word DESC LIMIT 1";
-                reader = command.ExecuteReader();
-                if (reader.Read())
-                    wordsCount = reader.GetInt32(0);
-                else
-                    wordsCount = 0;
-                reader.Close(); quran.Close();
+                using (SQLiteDataReader rows = command.ExecuteReader())
+                    wordsCount = rows.Read() ? rows.GetInt32(0) : 0;
             }
         }
 
-        private void PictureAt(int page) // Part Of Ayah Function // الصورة الحالية
+        private void PictureAt(int page)
         {
-            PageNumber = page;
-
-            CurrentPicture = CatchPicture(page);
-            spQuranPicture = new SharpPixelQK(CurrentPicture, true);
-
-            if (Discriminators.PageColors.Count > 0 && !isWordTableEmpty)
-                PageDecorations();
-            else if (darkMode && isWordTableEmpty)
+            Bitmap next = CatchPicture(page);
+            Bitmap clean;
+            SharpPixelQK pixels = spQuranPicture;
+            try
             {
-                spQuranPicture.Lock();
-                spQuranPicture.ReverseColors();
-                spQuranPicture.Unlock(true, true);
+                if (pixels == null || !pixels.TryUseBitmap(next)) pixels = new SharpPixelQK(next, true);
+
+                if (Discriminators.PageColors.Count > 0 && !isWordTableEmpty)
+                    PageDecorations(pixels, page);
+                else if (darkMode && isWordTableEmpty)
+                {
+                    pixels.Lock();
+                    try { pixels.ReverseColors(); }
+                    finally { pixels.Unlock(true, true); }
+                }
+
+                clean = (Bitmap)next.Clone();
+            }
+            catch
+            {
+                // Rebinding resets the pixel workspace; reload a page before applying any more highlights.
+                if (ReferenceEquals(spQuranPicture, pixels)) spQuranPicture = null;
+                next.Dispose();
+                throw;
             }
 
-            PagePicture = (Bitmap)CurrentPicture.Clone();
+            PageNumber = page;
+            spQuranPicture = pixels;
+            ReplacePictures(next, clean);
+        }
+
+        private void ReplacePictures(Bitmap current, Bitmap clean)
+        {
+            Bitmap previous = CurrentPicture, previousClean = PagePicture;
+            CurrentPicture = current;
+            PagePicture = clean;
+            if (previous == null && previousClean == null && current == null) return;
+
+            try { PictureReplaced?.Invoke(this, EventArgs.Empty); }
+            finally
+            {
+                previous?.Dispose();
+                if (!ReferenceEquals(previousClean, previous)) previousClean?.Dispose();
+            }
+        }
+
+        public void ReleasePictures()
+        {
+            success = false;
+            PageNumber = 0;
+            spQuranPicture = null;
+            ReplacePictures(null, null);
         }
 
         private Bitmap CatchPicture(int page)
@@ -380,21 +324,24 @@ namespace QuranKareem
             else if (File.Exists($"{path}{page}{Extension}")) return new Bitmap($"{path}{page}{Extension}");
             else
             {
-                string[] filesName = Directory.GetFiles(path);
-                for (int i = 0; i < filesName.Length; i++)
-                {
-                    if (filesName[i].Split('\\').Last().Contains(page.ToString().PadLeft(3, '0')))
-                        return new Bitmap(filesName[i]);
-                }
+                string number = page.ToString("D3");
+                foreach (string file in Directory.EnumerateFiles(path, "*" + Extension))
+                    if (Path.GetFileName(file).Contains(number)) return new Bitmap(file);
             }
-            return CurrentPicture;
+            return new Bitmap(Width, Height); // Never show the previous verse as if it were the requested page.
         }
         #endregion
 
         public bool WordOf(int word)// سيتم تعديله ان شاء الله
         {
-            if (!WordMode || isWordTableEmpty || isWordsDiscriminatorEmpty || word <= 0 || word > wordsCount)
+            if (!success || spQuranPicture == null || !WordMode || isWordTableEmpty || isWordsDiscriminatorEmpty || word <= 0 || word > wordsCount)
             {
+                if (CurrentWord > 0 && spQuranPicture != null)
+                {
+                    spQuranPicture.Lock();
+                    try { spQuranPicture.SetOriginal(true); }
+                    finally { spQuranPicture.Unlock(true); }
+                }
                 CurrentWord = -1;
                 return false;
             }
@@ -447,50 +394,38 @@ namespace QuranKareem
         #endregion
 
         #region Discriminators Methods
-        private void PageDecorations()
+        private void PageDecorations(SharpPixelQK pixels, int page)
         {
-            spQuranPicture.Lock();
-
-            quran.Open();
-            command.CommandText = $"SELECT min_x,max_x,min_y,max_y,discriminator FROM words JOIN ayat ON words.ayah_id = ayat.id WHERE discriminator IN ({Discriminators.GetPageKeysAsString()}) AND page={PageNumber}";
-            reader = command.ExecuteReader();
-
-            while (reader.Read())
-                spQuranPicture.Clear(Discriminators.PageColors[reader.GetInt32(4)], reader.GetInt32(0), reader.GetInt32(2), reader.GetInt32(1), reader.GetInt32(3), textColor, 30, false, true);
-
-            reader.Close(); quran.Close();
-            spQuranPicture.Unlock(true, true);
+            pixels.Lock();
+            try
+            {
+                command.CommandText = $"SELECT min_x,max_x,min_y,max_y,discriminator FROM words JOIN ayat ON words.ayah_id = ayat.id WHERE discriminator IN ({Discriminators.GetPageKeysAsString()}) AND page={page}";
+                using (SQLiteDataReader rows = command.ExecuteReader())
+                    while (rows.Read())
+                        pixels.Clear(Discriminators.PageColors[rows.GetInt32(4)], rows.GetInt32(0), rows.GetInt32(2), rows.GetInt32(1), rows.GetInt32(3), textColor, 30, false, true);
+            }
+            finally { pixels.Unlock(true, true); }
         }
 
         private void AyahDecorations(bool discri = true)
         {
             spQuranPicture.Lock();
-            spQuranPicture.SetOriginal();
-
-            quran.Open();
-            if (discri)
-                command.CommandText = $"SELECT min_x,max_x,min_y,max_y,discriminator FROM words WHERE discriminator IN ({Discriminators.GetAyahKeysAsString()}) AND ayah_id={ayahId}";
-            else
-                command.CommandText = $"SELECT min_x,max_x,min_y,max_y FROM lines WHERE ayah_id={ayahId}";
-            reader = command.ExecuteReader();
-
-            Color clr;
-            while (reader.Read())
+            try
             {
-                if (discri)
-                {
-                    clr = Discriminators.AyahColors[reader.GetInt32(4)];
-                    clr = clr.Name != "AyahColor" ? clr : GetColor(1, darkMode);
-                }
-                else
-                    clr = GetColor(1, darkMode);
-
-                if (!clr.IsEmpty)
-                    spQuranPicture.Clear(clr, reader.GetInt32(0), reader.GetInt32(2), reader.GetInt32(1), reader.GetInt32(3), textColor, 30, false, true);
+                spQuranPicture.SetOriginal();
+                command.CommandText = discri
+                    ? $"SELECT min_x,max_x,min_y,max_y,discriminator FROM words WHERE discriminator IN ({Discriminators.GetAyahKeysAsString()}) AND ayah_id={ayahId}"
+                    : $"SELECT min_x,max_x,min_y,max_y FROM lines WHERE ayah_id={ayahId}";
+                using (SQLiteDataReader rows = command.ExecuteReader())
+                    while (rows.Read())
+                    {
+                        Color clr = discri ? Discriminators.AyahColors[rows.GetInt32(4)] : GetColor(1, darkMode);
+                        if (clr.Name == "AyahColor") clr = GetColor(1, darkMode);
+                        if (!clr.IsEmpty)
+                            spQuranPicture.Clear(clr, rows.GetInt32(0), rows.GetInt32(2), rows.GetInt32(1), rows.GetInt32(3), textColor, 30, false, true);
+                    }
             }
-
-            reader.Close(); quran.Close();
-            spQuranPicture.Unlock(true);
+            finally { spQuranPicture.Unlock(true); }
         }
 
         private void WordDecorations()
@@ -517,117 +452,127 @@ namespace QuranKareem
         #endregion
 
         #region lines images
+        private sealed class ExportLine
+        {
+            public readonly List<Rectangle> Segments = new List<Rectangle>();
+            public readonly Dictionary<(int Surah, int Ayah, int Word), List<(Rectangle Area, Color Color)>> Words =
+                new Dictionary<(int, int, int), List<(Rectangle, Color)>>();
+            public Rectangle Bounds;
+
+            public Bitmap Crop(Bitmap pagePicture)
+            {
+                var crop = new Bitmap(Bounds.Width + 1, Bounds.Height + 1);
+                using (Graphics graphics = Graphics.FromImage(crop))
+                {
+                    graphics.Clear(Color.Transparent);
+                    foreach (Rectangle segment in Segments)
+                        graphics.DrawImage(pagePicture, new Rectangle(segment.X - Bounds.X, segment.Y - Bounds.Y, segment.Width, segment.Height),
+                            segment, GraphicsUnit.Pixel);
+                }
+                return crop;
+            }
+
+            public Bitmap Highlight(Bitmap crop, List<(Rectangle Area, Color Color)> marks, Color text)
+            {
+                var highlighted = (Bitmap)crop.Clone();
+                var pixels = new SharpPixelQK(highlighted);
+                try
+                {
+                    pixels.Lock();
+                    try
+                    {
+                        foreach (var mark in marks)
+                        {
+                            Rectangle area = mark.Area;
+                            int left = Math.Max(0, area.Left - Bounds.Left), top = Math.Max(0, area.Top - Bounds.Top);
+                            int right = Math.Min(crop.Width - 1, area.Right - Bounds.Left), bottom = Math.Min(crop.Height - 1, area.Bottom - Bounds.Top);
+                            if (left <= right && top <= bottom)
+                                pixels.Clear(mark.Color, left, top, right, bottom, text, 30, false, true);
+                        }
+                    }
+                    finally { pixels.Unlock(true); }
+                    return highlighted;
+                }
+                catch { highlighted.Dispose(); throw; }
+            }
+        }
+
+        private Dictionary<int, ExportLine> ReadExportLines(int page, bool includeWords,
+            Dictionary<(int Surah, int Ayah, int Word), int> wordLines = null)
+        {
+            var lines = new Dictionary<int, ExportLine>();
+            Color wordColor = GetColor(2, darkMode);
+            bool useMarks = includeWords && !wordColor.IsEmpty && !isWordsDiscriminatorEmpty;
+            using (var connection = new SQLiteConnection(quran.ConnectionString))
+            using (var query = connection.CreateCommand())
+            {
+                connection.Open();
+                query.Parameters.AddWithValue("@page", page);
+                query.CommandText = @"SELECT line,min_x,max_x,min_y,max_y FROM lines
+                    JOIN ayat ON lines.ayah_id=ayat.id WHERE page=@page ORDER BY ayat.id,lines.rowid";
+                using (var rows = query.ExecuteReader())
+                    while (rows.Read())
+                    {
+                        int number = rows.GetInt32(0);
+                        var segment = Rectangle.FromLTRB(rows.GetInt32(1), rows.GetInt32(3), rows.GetInt32(2), rows.GetInt32(4));
+                        if (!lines.TryGetValue(number, out ExportLine line))
+                            lines.Add(number, line = new ExportLine { Bounds = segment });
+                        else line.Bounds = Rectangle.Union(line.Bounds, segment);
+                        line.Segments.Add(segment);
+                    }
+
+                if (!isWordTableEmpty && (useMarks || wordLines != null))
+                {
+                    query.CommandText = @"SELECT line,surah,ayah,word,discriminator,min_x,max_x,min_y,max_y
+                        FROM words JOIN ayat ON words.ayah_id=ayat.id
+                        WHERE page=@page AND word BETWEEN 1 AND 599 ORDER BY ayat.id,word,words.rowid";
+                    using (var rows = query.ExecuteReader())
+                        while (rows.Read())
+                        {
+                            int number = rows.GetInt32(0);
+                            var key = (rows.GetInt32(1), rows.GetInt32(2), rows.GetInt32(3));
+                            if (!lines.TryGetValue(number, out ExportLine line)) continue;
+                            if (wordLines != null && !wordLines.ContainsKey(key)) wordLines.Add(key, number);
+                            if (!useMarks) continue;
+                            if (!line.Words.TryGetValue(key, out var marks))
+                                line.Words.Add(key, marks = new List<(Rectangle, Color)>());
+                            if (!Discriminators.WordColors.TryGetValue(rows.GetInt32(4), out Color color) || color.IsEmpty || color.Name == "WordColor")
+                                color = wordColor;
+                            var area = Rectangle.FromLTRB(rows.GetInt32(5), rows.GetInt32(7), rows.GetInt32(6), rows.GetInt32(8));
+                            marks.Add((area, color));
+                        }
+                }
+            }
+            return lines;
+        }
+
         public List<Bitmap> GetLines()
         {
-            List<Bitmap> bitmaps = new List<Bitmap>();
+            var result = new List<Bitmap>(15);
+            var lines = success ? ReadExportLines(PageNumber, includeWords: false) : new Dictionary<int, ExportLine>();
             for (int i = 1; i <= 15; i++)
-                bitmaps.Add(GetLine(PageNumber, PagePicture, i));
-            return bitmaps;
+                result.Add(lines.TryGetValue(i, out ExportLine line) ? line.Crop(PagePicture) : null);
+            return result;
         }
 
         public List<List<Bitmap>> GetLinesWithWordsMarks()
         {
-            var bitmaps = new List<List<Bitmap>>();
+            var result = new List<List<Bitmap>>(15);
+            var lines = success ? ReadExportLines(PageNumber, includeWords: true) : new Dictionary<int, ExportLine>();
             for (int i = 1; i <= 15; i++)
-                bitmaps.Add(GetLineWithWordsMarks(PageNumber, PagePicture, i));
-            return bitmaps;
-        }
-
-        private readonly List<int> ints = new List<int>();
-        private List<Bitmap> GetLineWithWordsMarks(int page, Bitmap pagePic, int line = -1, int ayah = -1, int word = -2)
-        {
-            var coords = new int[2];
-            Bitmap bmap = GetLine(page, pagePic, line, coords);
-            if (bmap == null) return null;
-            List<Bitmap> bitmaps = new List<Bitmap> { bmap };
-            if (GetColor(2, darkMode).IsEmpty || isWordsDiscriminatorEmpty) return bitmaps;
-            var list = new List<int[]>();
-            command.CommandText = $"SELECT min_x,max_x,min_y,max_y,ayah,word,discriminator FROM words JOIN ayat ON words.ayah_id=ayat.id WHERE page={page} AND line={line} AND " + (word == -2 ? "word>=1 AND word<=599 ORDER BY ayah_id,word" : $"ayah={ayah} AND word={word}");
-            quran.Open();
-            reader = command.ExecuteReader();
-
-            int a, w; ints.Clear();
-            if (!reader.Read())
             {
-                reader.Close(); quran.Close();
-                return bitmaps;
-            }
-            a = reader.GetInt32(4);
-            w = reader.GetInt32(5);
-
-            do
-            {
-                if (a != reader.GetInt32(4) || w != reader.GetInt32(5))
+                if (!lines.TryGetValue(i, out ExportLine line)) { result.Add(null); continue; }
+                Bitmap crop = line.Crop(PagePicture);
+                var variants = new List<Bitmap> { crop };
+                foreach (var word in line.Words.OrderBy(entry => entry.Key.Surah).ThenBy(entry => entry.Key.Ayah).ThenBy(entry => entry.Key.Word))
                 {
-                    bitmaps.Add((Bitmap)bmap.Clone());
-                    bitmaps.Last().Tag = $"{a},{w}";
-                    list.Add(ints.ToArray());
-                    ints.Clear();
-                    a = reader.GetInt32(4);
-                    w = reader.GetInt32(5);
+                    Bitmap mark = line.Highlight(crop, word.Value, textColor);
+                    mark.Tag = $"{word.Key.Ayah},{word.Key.Word}";
+                    variants.Add(mark);
                 }
-                ints.Add(reader.GetInt32(0)); ints.Add(reader.GetInt32(1)); ints.Add(reader.GetInt32(2)); ints.Add(reader.GetInt32(3)); ints.Add(reader.GetInt32(6));
-            } while (reader.Read());
-            bitmaps.Add((Bitmap)bmap.Clone());
-            bitmaps.Last().Tag = $"{a},{w}";
-            list.Add(ints.ToArray());
-
-            reader.Close(); quran.Close();
-
-            SharpPixelQK sp;
-            Color clr;
-            for (int i = 0; i < list.Count; i++)
-            {
-                sp = new SharpPixelQK(bitmaps[i + 1]);
-                sp.Lock();
-                for (int j = 0; j < list[i].Length / 5; j++)
-                {
-                    clr = Discriminators.WordColors[list[i][j * 5 + 4]];
-                    clr = clr.Name != "WordColor" && !clr.IsEmpty ? clr : GetColor(2, darkMode);
-                    sp.Clear(clr,
-                        (list[i][j * 5] - coords[0]) >= 0 ? list[i][j * 5] - coords[0] : 0,
-                        (list[i][j * 5 + 2] - coords[1]) >= 0 ? list[i][j * 5 + 2] - coords[1] : 0,
-                        (list[i][j * 5 + 1] - coords[0]) < bmap.Width ? list[i][j * 5 + 1] - coords[0] : bmap.Width - 1,
-                        (list[i][j * 5 + 3] - coords[1]) < bmap.Height ? list[i][j * 5 + 3] - coords[1] : bmap.Height - 1,
-                        textColor, 30, false, true);
-                }
-                sp.Unlock(true);
+                result.Add(variants);
             }
-            return bitmaps;
-        }
-
-        private Bitmap GetLine(int page, Bitmap pagePic, int line, int[] lineCoordinates = null)
-        {
-            if (!success) return null;
-            List<int[]> list = new List<int[]>();
-            command.CommandText = $"SELECT min_x,max_x,min_y,max_y FROM lines JOIN ayat ON lines.ayah_id=ayat.id WHERE page={page} AND line={line}";
-            quran.Open();
-            reader = command.ExecuteReader();
-            while (reader.Read())
-                list.Add(new int[4] { reader.GetInt32(0), reader.GetInt32(1), reader.GetInt32(2), reader.GetInt32(3) });
-            reader.Close(); quran.Close();
-            if (list.Count == 0) return null;
-
-            int[] final = list[0].ToArray(); // copy
-            for (int i = 1; i < list.Count; i++)
-            {
-                if (list[i][0] < final[0]) final[0] = list[i][0];
-                if (list[i][1] > final[1]) final[1] = list[i][1];
-                if (list[i][2] < final[2]) final[2] = list[i][2];
-                if (list[i][3] > final[3]) final[3] = list[i][3];
-            }
-            if (lineCoordinates?.Length >= 2)
-            {
-                lineCoordinates[0] = final[0];
-                lineCoordinates[1] = final[2];
-            }
-            Bitmap bitmap = new Bitmap(final[1] - final[0] + 1, final[3] - final[2] + 1);
-            Graphics gr = Graphics.FromImage(bitmap);
-            gr.Clear(Color.Empty);
-            for (int i = 0; i < list.Count; i++)
-                gr.DrawImage(pagePic, new Rectangle(list[i][0] - final[0], list[i][2] - final[2], list[i][1] - list[i][0], list[i][3] - list[i][2]), new Rectangle(list[i][0], list[i][2], list[i][1] - list[i][0], list[i][3] - list[i][2]), GraphicsUnit.Pixel);
-
-            return bitmap;
+            return result;
         }
 
         public int[] GetStartAndEndOfPage()
@@ -636,7 +581,7 @@ namespace QuranKareem
             int[] ints = new int[2];
             quran.Open();
             reader = command.ExecuteReader();
-            if (reader.Read())
+            if (reader.Read() && !reader.IsDBNull(0))
             {
                 ints[0] = reader.GetInt32(0);
                 ints[1] = reader.GetInt32(1);
@@ -646,40 +591,65 @@ namespace QuranKareem
             return ints;
         }
 
-#warning very slow
         public void GetAyatInLinesWithWordsMarks(List<int> ayahword, int width, int height, int locx, int locy, int linWdth, int linHght, bool autoHeight, bool yEdit, string path, List<string> paths, Bitmap pageClone, int surah, int page)
         {
+            if (paths == null) throw new ArgumentNullException(nameof(paths));
             paths.Clear();
-            if (!success || isWordTableEmpty || ayahword == null || paths == null) return;
+            var export = PrepareLineExport(ayahword, width, height, locx, locy, linWdth, linHght, autoHeight, yEdit, path, pageClone, surah, page);
+            if (export != null) paths.AddRange(export());
+        }
 
-            Directory.CreateDirectory($"{path}\\img\\");
-            
-            int line = 0;
-            Bitmap bmp, bmp0;
-            Graphics gr; int h;
-            for (int i = 0; i < ayahword.Count / 2; i++)
+        internal Func<List<string>> PrepareLineExport(List<int> ayahword, int width, int height, int locx, int locy, int linWdth, int linHght,
+            bool autoHeight, bool yEdit, string path, Bitmap pageClone, int surah, int page)
+        {
+            if (!success || isWordTableEmpty || ayahword == null || ayahword.Count < 2) return null;
+            var wordLines = new Dictionary<(int, int, int), int>();
+            var lines = ReadExportLines(page, includeWords: true, wordLines: wordLines);
+            if (lines.Count == 0) return null;
+            int[] intervals = ayahword.ToArray();
+            Color text = textColor;
+            return () => RenderLineExport(intervals, lines, wordLines, text, width, height, locx, locy, linWdth, linHght, autoHeight, yEdit, path, pageClone, surah);
+        }
+
+        private static List<string> RenderLineExport(int[] intervals, Dictionary<int, ExportLine> lines, Dictionary<(int, int, int), int> wordLines,
+            Color text, int width, int height, int locx, int locy, int linWdth, int linHght, bool autoHeight, bool yEdit, string path, Bitmap pageClone, int surah)
+        {
+            var paths = new List<string>(intervals.Length / 2);
+            // A pause has no word coordinates; keep the previously displayed line.
+            int currentLine = lines.Keys.Min();
+            var crops = new Dictionary<int, Bitmap>();
+            using (var output = new LineFrameWriter(path, width, height))
             {
-                quran.Open();
-                command.CommandText = $"SELECT line FROM ayat JOIN words ON ayat.id = words.ayah_id WHERE surah={surah} AND ayah = {ayahword[i * 2]} AND word = {ayahword[i * 2 + 1]} LIMIT 1";
-                reader = command.ExecuteReader();
-                if (reader.Read())
-                    line = reader.GetInt32(0);
-
-                reader.Close(); quran.Close();
-                bmp = new Bitmap(width, height);
-                gr = Graphics.FromImage(bmp);
-                gr.Clear(Color.Empty);
-                bmp0 = GetLineWithWordsMarks(page, pageClone, line, ayahword[i * 2], ayahword[i * 2 + 1]).Last();
-                if (autoHeight)
+                try
                 {
-                    h = (int)(1f * bmp0.Height / bmp0.Width * linWdth);
-                    if (yEdit) locy -= (h - linHght) / 2;
-                    linHght = h;
+                    for (int i = 0; i < intervals.Length / 2; i++)
+                    {
+                        var key = (surah, intervals[i * 2], intervals[i * 2 + 1]);
+                        if (wordLines.TryGetValue(key, out int number)) currentLine = number;
+                        ExportLine line = lines[currentLine];
+                        if (!crops.TryGetValue(currentLine, out Bitmap crop))
+                            crops.Add(currentLine, crop = line.Crop(pageClone));
+                        if (autoHeight)
+                        {
+                            int heightForLine = (int)(1f * crop.Height / crop.Width * linWdth);
+                            if (yEdit) locy -= (heightForLine - linHght) / 2;
+                            linHght = heightForLine;
+                        }
+                        var target = new Rectangle(locx, locy, linWdth, linHght);
+                        if (line.Words.TryGetValue(key, out var marks))
+                        {
+                            using (Bitmap highlighted = line.Highlight(crop, marks, text))
+                                paths.Add(output.Write(i, highlighted, target, scale: true));
+                        }
+                        else paths.Add(output.Write(i, crop, target, scale: true));
+                    }
                 }
-                gr.DrawImage(bmp0, locx, locy, linWdth, linHght);
-                bmp.Save($"{path}\\img\\{i}.png", System.Drawing.Imaging.ImageFormat.Png);
-                paths.Add($"img\\{i}.png");
+                finally
+                {
+                    foreach (Bitmap crop in crops.Values) crop.Dispose();
+                }
             }
+            return paths;
         }
         #endregion
 
